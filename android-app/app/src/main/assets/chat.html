@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>角色</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { height:100%; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:#f7f7f7; font-size:15px; color:#191919; overflow:hidden; }
+.page { position:absolute; top:0; left:0; right:0; bottom:50px; display:none; flex-direction:column; background:#f7f7f7; }
+.page.on { display:flex; }
+/* 聊天/朋友圈/设置/资料页隐藏了 tabbar，页面要铺到底，否则输入栏离屏幕底多出 50px */
+body.notab .page { bottom:0; }
+.topbar { flex:none; height:46px; background:#ededed; display:flex; align-items:center; padding:0 12px; border-bottom:0.5px solid #dcdcdc; position:relative; z-index:5; }
+.topbar .tt { position:absolute; left:0; right:0; text-align:center; font-size:16.5px; font-weight:500; pointer-events:none; }
+.topbar .bk { width:26px; height:26px; position:relative; z-index:2; }
+.topbar .bk svg { width:24px; height:24px; }
+.tabbar { position:absolute; left:0; right:0; bottom:0; height:50px; background:#f7f7f7; border-top:0.5px solid #d9d9d9; display:flex; z-index:20; }
+.tab { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:10.5px; color:#7f7f7f; }
+.tab svg { width:25px; height:25px; margin-bottom:1px; }
+.tab.on { color:#07c160; }
+.body { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+/* ---- 聊天列表 ---- */
+.cell { display:flex; align-items:center; padding:11px 14px; background:#fff; border-bottom:0.5px solid #f0f0f0; }
+.cell:active { background:#e5e5e5; }
+.cav { width:44px; height:44px; border-radius:5px; flex:none; overflow:hidden; background:#ffe3ec; display:flex; align-items:center; justify-content:center; font-size:15px; color:#e5497f; }
+.cav img { width:100%; height:100%; object-fit:cover; }
+.cmain { flex:1; margin-left:11px; min-width:0; }
+.crow1 { display:flex; justify-content:space-between; align-items:center; }
+.cname { font-size:15.5px; }
+.ctime { font-size:11px; color:#b2b2b2; }
+.crow2 { display:flex; justify-content:space-between; align-items:center; margin-top:3px; }
+.cprev { font-size:13px; color:#9c9c9c; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:82%; }
+.dot { width:8px; height:8px; background:#fa5151; border-radius:50%; flex:none; }
+/* ---- 聊天页 ---- */
+#page-chat { background:#f5f5f5; }
+.chat-body { flex:1; overflow-y:auto; padding:10px 12px 14px; }
+.time { text-align:center; font-size:11px; color:#b2b2b2; margin:10px 0 6px; }
+.mrow { display:flex; margin:9px 0; align-items:flex-start; }
+.mrow.me { flex-direction:row-reverse; }
+.mav { width:38px; height:38px; border-radius:4px; flex:none; overflow:hidden; background:#ffe3ec; display:flex; align-items:center; justify-content:center; font-size:13px; color:#e5497f; }
+.mav img { width:100%; height:100%; object-fit:cover; }
+.bub { max-width:72%; margin:0 9px; padding:9px 12px; border-radius:5px; background:#fff; font-size:15.5px; line-height:1.45; white-space:pre-wrap; word-break:break-word; position:relative; }
+.mrow.me .bub { background:#95ec69; }
+.bub img { max-width:150px; max-height:200px; border-radius:4px; display:block; }
+.typing { text-align:center; font-size:11.5px; color:#b2b2b2; padding:4px 0; }
+.chatfoot { flex:none; background:#f7f7f7; border-top:0.5px solid #dcdcdc; padding:7px 10px; display:flex; align-items:center; gap:8px; }
+.chatfoot textarea { flex:1; border:none; background:#fff; border-radius:5px; height:36px; padding:8px 10px; font-size:15.5px; resize:none; outline:none; }
+.chatfoot .tool { width:34px; height:34px; border:none; background:none; font-size:24px; color:#191919; flex:none; line-height:34px; padding:0; }
+.chatfoot .send { width:52px; height:34px; border:none; border-radius:5px; background:#07c160; color:#fff; font-size:14.5px; flex:none; }
+#imgPrev { flex:none; background:#f7f7f7; border-top:0.5px solid #dcdcdc; padding:6px 10px; display:none; align-items:center; gap:8px; font-size:12px; color:#888; }
+#imgPrev img { width:40px; height:40px; object-fit:cover; border-radius:4px; }
+#imgPrev span { flex:1; }
+#imgPrev b { color:#e5497f; font-weight:normal; }
+/* ---- 表情面板 ---- */
+#stkPanel { position:absolute; left:0; right:0; bottom:52px; height:230px; background:#f7f7f7; border-top:0.5px solid #dcdcdc; display:none; flex-direction:column; z-index:30; }
+#stkGrid { flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(5,1fr); gap:6px; padding:10px; }
+#stkGrid img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; background:#fff; }
+.stkcell { position:relative; }
+.stkcell .del { position:absolute; top:-4px; right:-4px; width:18px; height:18px; border-radius:50%; background:#fa5151; color:#fff; font-size:12px; line-height:18px; text-align:center; }
+.stkadd { display:flex; align-items:center; justify-content:center; font-size:26px; color:#b2b2b2; background:#fff; border-radius:6px; aspect-ratio:1; }
+/* ---- 通用列表页 ---- */
+.grp { margin-top:8px; }
+.grp .cell .ico { width:24px; height:24px; margin-right:11px; flex:none; display:flex; align-items:center; justify-content:center; border-radius:5px; color:#fff; font-size:13px; }
+.gray { color:#9c9c9c; }
+.arrow { color:#c8c8c8; font-size:15px; }
+/* ---- 朋友圈 ---- */
+#page-moments .body { background:#fff; }
+.cover { height:200px; background:linear-gradient(135deg,#ffd3e2,#ffe9d6 55%,#fff6d9); position:relative; }
+.cover .mname { position:absolute; right:14px; bottom:-24px; color:#fff; font-size:16px; font-weight:500; text-shadow:0 1px 3px rgba(0,0,0,.25); }
+.cover .mav { position:absolute; right:14px; bottom:-38px; width:56px; height:56px; border-radius:8px; border:2px solid #fff; overflow:hidden; }
+.moment { padding:14px; border-bottom:0.5px solid #f0f0f0; display:flex; }
+.moment .mav { width:40px; height:40px; border-radius:5px; }
+.mbody { flex:1; margin-left:10px; min-width:0; }
+.mtext { font-size:15px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+.mimgs { display:flex; flex-wrap:wrap; gap:4px; margin-top:7px; }
+.mimgs img { width:31%; aspect-ratio:1; object-fit:cover; border-radius:3px; }
+.mt { font-size:11px; color:#b2b2b2; margin-top:7px; }
+.mact { display:flex; gap:18px; margin-top:6px; font-size:13px; color:#576b95; }
+.mlike { margin-top:7px; background:#f7f7f7; border-radius:4px; padding:5px 8px; font-size:13px; color:#576b95; }
+.mcm { background:#f7f7f7; border-radius:4px; padding:5px 8px; margin-top:4px; font-size:13.5px; line-height:1.5; }
+.mcm b { font-weight:500; color:#576b95; }
+.mcin { display:flex; gap:6px; margin-top:6px; }
+.mcin input { flex:1; border:0.5px solid #ddd; border-radius:4px; height:30px; padding:0 8px; font-size:13.5px; outline:none; background:#fff; }
+.mcin button { border:none; background:#07c160; color:#fff; border-radius:4px; padding:0 12px; font-size:13px; }
+/* ---- 日记 ---- */
+#page-diary .body { background:#f7f7f7; }
+
+/* ---- 我 / 资料 ---- */
+.mehead { display:flex; align-items:center; background:#fff; padding:22px 16px; margin-top:8px; }
+.mehead .cav { width:60px; height:60px; border-radius:8px; }
+.mehead .cmain { margin-left:14px; flex:1; }
+.menick { font-size:19px; font-weight:500; }
+.meid { font-size:12.5px; color:#9c9c9c; margin-top:4px; }
+.prof { text-align:center; padding-top:40px; }
+.prof .cav { width:76px; height:76px; border-radius:10px; margin:0 auto; }
+.prof .pn { font-size:19px; font-weight:500; margin-top:12px; }
+.prof .pr { font-size:13px; color:#9c9c9c; margin-top:6px; }
+.pbtn { display:block; width:calc(100% - 40px); margin:26px auto 0; height:44px; border:none; border-radius:8px; background:#07c160; color:#fff; font-size:15.5px; }
+/* ---- 设置 ---- */
+.setrow { display:flex; align-items:center; padding:13px 14px; background:#fff; border-bottom:0.5px solid #f0f0f0; }
+.setrow .lab { width:88px; font-size:15px; flex:none; }
+.setrow input { flex:1; border:none; outline:none; font-size:14px; background:transparent; min-width:0; }
+.hint { font-size:11.5px; color:#b2b2b2; padding:7px 14px; line-height:1.5; }
+/* ---- 模型页 / 日志页 ---- */
+.setrow select { flex:1; border:none; outline:none; font-size:14px; background:transparent; min-width:0; color:#191919; appearance:none; -webkit-appearance:none; }
+.setrow select:disabled { color:#b2b2b2; }
+.seg { display:flex; margin:4px 14px 10px; border:1px solid #07c160; border-radius:6px; overflow:hidden; }
+.seg div { flex:1; text-align:center; padding:8px 0; font-size:14px; color:#07c160; }
+.seg div.on { background:#07c160; color:#fff; }
+.sbtn { display:block; width:calc(100% - 28px); margin:12px auto 0; height:44px; border:none; border-radius:8px; background:#3e7bfa; color:#fff; font-size:15px; }
+.sbtn.green { background:#07c160; }
+.sbtn.gray { background:#8a8a8a; }
+.logbox { margin:0 14px; background:#fff; border-radius:6px; padding:10px; font-size:11.5px; line-height:1.55; color:#333; max-height:44vh; overflow-y:auto; white-space:pre-wrap; word-break:break-all; font-family:monospace; }
+.lgitem { padding:8px 0; border-bottom:0.5px solid #f0f0f0; }
+.lgitem .l1 { font-size:12px; color:#888; }
+.lgitem .l2 { font-size:13.5px; color:#191919; margin-top:2px; word-break:break-all; }
+/* ---- 闪屏 / 弹窗 / 查看 ---- */
+#splash { position:fixed; inset:0; z-index:99; background:linear-gradient(160deg,#ffd3e2,#ffc7d9); display:flex; flex-direction:column; align-items:center; justify-content:center; transition:opacity .45s; }
+#splash img { width:96px; height:96px; border-radius:22px; box-shadow:0 8px 30px rgba(229,73,127,.35); }
+#splash .s1 { margin-top:18px; font-size:22px; font-weight:600; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.15); }
+#splash .s2 { margin-top:7px; font-size:13px; color:#fff; opacity:.9; }
+#viewer { position:fixed; inset:0; z-index:95; background:rgba(0,0,0,.92); display:none; align-items:center; justify-content:center; }
+#viewer img { max-width:96%; max-height:88%; }
+#updDlg { position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.4); display:none; align-items:center; justify-content:center; }
+#updDlg .box { background:#fff; border-radius:12px; width:78%; max-width:300px; overflow:hidden; text-align:center; }
+#toast { position:fixed; left:50%; bottom:110px; transform:translateX(-50%); background:rgba(0,0,0,.75); color:#fff; font-size:13.5px; padding:9px 16px; border-radius:7px; z-index:99; display:none; max-width:80%; text-align:center; }
+</style>
+</head>
+<body>
+
+<!-- 闪屏（仅首次安装显示） -->
+<div id="splash">
+  <img src="logo.png">
+  <div class="s1">角色</div>
+  <div class="s2">她一直都在</div>
+</div>
+
+<!-- 聊天（对话列表） -->
+<div class="page on" id="page-list">
+  <div class="topbar"><div class="tt">角色</div></div>
+  <div class="body" id="sessList"></div>
+</div>
+
+<!-- 通讯录 -->
+<div class="page" id="page-contacts">
+  <div class="topbar"><div class="tt">通讯录</div></div>
+  <div class="body">
+    <div class="grp">
+      <div class="cell" onclick="openProfile()"><div class="cav" id="ctAv"></div>
+        <div class="cmain"><div class="cname">角色</div></div></div>
+      <div class="cell" onclick="tip('用于中转文件，敬请期待')"><div class="cav" style="background:#e6f7ff;color:#3aa3ff">传</div>
+        <div class="cmain"><div class="cname">文件传输助手</div></div></div>
+    </div>
+    <div class="grp">
+      <div class="cell" onclick="tip('敬请期待')"><div class="cmain"><div class="cname gray">新的朋友</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="cmain"><div class="cname gray">群聊</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="cmain"><div class="cname gray">标签</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="cmain"><div class="cname gray">公众号</div></div><span class="arrow">›</span></div>
+    </div>
+    <div style="text-align:center;font-size:11px;color:#c8c8c8;padding:14px 0">A · B · C · L · W · X · Y · Z</div>
+  </div>
+</div>
+
+<!-- 发现 -->
+<div class="page" id="page-discover">
+  <div class="topbar"><div class="tt">发现</div></div>
+  <div class="body">
+    <div class="grp">
+      <div class="cell" onclick="openMoments()"><div class="ico" style="background:#f5a623">圈</div>
+        <div class="cmain"><div class="cname">朋友圈</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="openPage('diary')"><div class="ico" style="background:#7e6bf2">记</div>
+        <div class="cmain"><div class="cname">日记</div></div><span class="arrow">›</span></div>
+    </div>
+    <div class="grp">
+      <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#fa5151">视</div><div class="cmain"><div class="cname gray">视频号</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#10aeff">直</div><div class="cmain"><div class="cname gray">直播</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#07c160">扫</div><div class="cmain"><div class="cname gray">扫一扫</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#3e7bfa">看</div><div class="cmain"><div class="cname gray">看一看</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#3e7bfa">搜</div><div class="cmain"><div class="cname gray">搜一搜</div></div><span class="arrow">›</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- 我 -->
+<div class="page" id="page-me">
+  <div class="topbar"><div class="tt">我</div></div>
+  <div class="body">
+    <div class="mehead" onclick="pick('myav')">
+      <div class="cav" id="meAv"></div>
+      <div class="cmain"><div class="menick" id="meNick">我</div><div class="meid">ID：zhixia_friend</div></div>
+      <span class="arrow">›</span>
+    </div>
+    <div class="grp">
+      <div class="cell" onclick="openStk()"><div class="ico" style="background:#f5a623">表</div><div class="cmain"><div class="cname">表情</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#f5a623">藏</div><div class="cmain"><div class="cname gray">收藏</div></div><span class="arrow">›</span></div>
+    </div>
+    <div class="grp">
+      <div class="cell" onclick="openSettings()"><div class="ico" style="background:#7e6bf2">⚙</div><div class="cmain"><div class="cname">设置</div></div><span class="arrow">›</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- 聊天页 -->
+<div class="page" id="page-chat">
+  <div class="topbar"><div class="bk" onclick="openPage('list')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">角色</div></div>
+  <div class="chat-body" id="list"></div>
+  <div class="typing" id="typing" style="display:none">对方正在输入…</div>
+  <div id="imgPrev"><img id="prevImg"><span>图片已附上，可以再写句话一起发</span><b onclick="cancelImg()">移除</b></div>
+  <div class="chatfoot">
+    <button class="tool" id="imgBtn">＋</button>
+    <button class="tool" id="stkBtn">☺</button>
+    <textarea id="input" rows="1" placeholder="发消息…"></textarea>
+    <button class="send" id="sendBtn">发送</button>
+  </div>
+  <div id="stkPanel">
+    <div id="stkGrid"></div>
+  </div>
+</div>
+
+<!-- 朋友圈 -->
+<div class="page" id="page-moments">
+  <div class="topbar"><div class="bk" onclick="openPage('discover')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">朋友圈</div></div>
+  <div class="body" id="momBody">
+    <div class="cover"><div class="mname">角色</div><div class="mav" id="momAv"></div></div>
+    <div style="height:44px"></div>
+    <div id="momList"></div>
+    <div style="text-align:center;font-size:11.5px;color:#c8c8c8;padding:16px 0" id="momFoot">加载中…</div>
+  </div>
+</div>
+
+<!-- 日记 -->
+<div class="page" id="page-diary">
+  <div class="topbar"><div class="bk" onclick="openPage('discover')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">日记</div></div>
+  <div class="body">
+    <div id="dList"></div>
+    <div id="dRead" style="display:none">
+      <div style="font-size:13px;color:#9c9c9c;margin:14px 14px 10px"><span id="dDate"></span> · <span style="color:#7e6bf2;cursor:pointer" onclick="diaryBack()">返回列表</span></div>
+      <div id="dBody" style="margin:0 14px 20px;background:#fff;border-radius:10px;padding:16px;font-size:15.5px;line-height:1.75;white-space:pre-wrap;word-break:break-word;color:#222;"></div>
+    </div>
+    <div style="text-align:center;font-size:11.5px;color:#c8c8c8;padding:16px 0" id="dFoot">加载中…</div>
+  </div>
+</div>
+
+<!-- 她的资料页 -->
+<div class="page" id="page-profile">
+  <div class="topbar"><div class="bk" onclick="openPage('contacts')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">详细资料</div></div>
+  <div class="body">
+    <div class="prof">
+      <div class="cav" id="pfAv"></div>
+      <div class="pn">角色</div>
+      <div class="pr">ID：linzhixia　地区：四川 成都</div>
+    </div>
+    <button class="pbtn" onclick="openChat()">发消息</button>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div class="page" id="page-settings">
+  <div class="topbar"><div class="bk" onclick="openPage('me')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">设置</div></div>
+  <div class="body">
+    <div class="grp">
+      <div class="cell" onclick="openModels()"><div class="ico" style="background:#3e7bfa">模</div>
+        <div class="cmain"><div class="cname">模型</div><div class="cprev" id="modelSum">点进去换模型和接口</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="openLogs()"><div class="ico" style="background:#fa5151">志</div>
+        <div class="cmain"><div class="cname">错误日志</div><div class="cprev" id="logSum">出问题了来这里导出</div></div><span class="arrow">›</span></div>
+    </div>
+    <div class="grp">
+      <div class="setrow"><div class="lab">她的性格</div><input id="personaCur" readonly placeholder="加载中…"></div>
+      <div id="personaList"></div>
+      <div class="hint">换性格不用重启，点一下就生效；长相永远是同一个人。</div>
+    </div>
+    <div class="grp">
+      <div class="setrow" onclick="pick('herav')"><div class="lab">她的头像</div>
+        <input id="herAvIn" readonly placeholder="点击换图（相册选）"><div class="cav" style="width:32px;height:32px" id="setHerAv"></div></div>
+      <div class="setrow" onclick="pick('bg')"><div class="lab">聊天背景</div><input readonly placeholder="相册选图"><span class="arrow">›</span></div>
+    </div>
+    <div class="grp">
+      <div class="setrow"><div class="lab">地址</div><input id="baseIn" placeholder="http://…"></div>
+      <div class="setrow"><div class="lab">口令</div><input id="tokenIn" placeholder="token"></div>
+      <div class="hint">一般不用改。连接异常时先点「测试连接」。</div>
+      <button style="display:block;width:calc(100% - 28px);margin:12px auto 0;height:44px;border:none;border-radius:8px;background:#07c160;color:#fff;font-size:15px" onclick="saveSetup()">保存并重新连接</button>
+      <button style="display:block;width:calc(100% - 28px);margin:10px auto 0;height:44px;border:none;border-radius:8px;background:#3e7bfa;color:#fff;font-size:15px" onclick="testConn()">测试连接</button>
+      <div id="connResult" style="text-align:center;font-size:12.5px;color:#888;padding:10px 0"></div>
+    </div>
+    <div class="grp">
+      <button style="display:block;width:calc(100% - 28px);margin:0 auto 16px;height:44px;border:none;border-radius:8px;background:#8a8a8a;color:#fff;font-size:15px" onclick="checkUpdate(true)">检查更新</button>
+    </div>
+  </div>
+</div>
+
+<!-- 模型 -->
+<div class="page" id="page-models">
+  <div class="topbar"><div class="bk" onclick="openPage('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">模型</div></div>
+  <div class="body">
+    <div class="grp">
+      <div class="hint" style="padding-bottom:2px">服务商</div>
+      <div class="seg">
+        <div id="prov-siliconflow" onclick="setProvider('siliconflow')">硅基流动</div>
+        <div id="prov-custom" onclick="setProvider('custom')">自定义</div>
+      </div>
+      <div class="hint" id="provHint">默认走硅基流动。换别家（OpenAI 兼容的都行）选自定义，自己填地址和密钥。</div>
+    </div>
+    <div class="grp">
+      <div class="setrow"><div class="lab">接口地址</div><input id="mBase" placeholder="https://…/v1"></div>
+      <div class="setrow"><div class="lab">密钥</div><input id="mKey" placeholder="sk-…"></div>
+      <div class="hint">密钥只存在她那边（云上的配置里），不会发到别处。</div>
+    </div>
+    <div class="grp">
+      <div class="setrow"><div class="lab">对话模型</div><select id="mChat"></select></div>
+      <div class="setrow"><div class="lab">看图模型</div><select id="mVision"></select></div>
+      <div class="setrow"><div class="lab">生图模型</div><select id="mImage"></select></div>
+      <div class="setrow"><div class="lab">语音模型</div><select id="mAudio" disabled></select></div>
+      <div class="hint" id="modelSrc">加载中…</div>
+      <button class="sbtn" onclick="loadModelCfg(true)">重新拉取模型列表</button>
+    </div>
+    <div class="grp">
+      <button class="sbtn green" onclick="saveModels()">保存并生效</button>
+      <div class="hint" id="mResult"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 错误日志 -->
+<div class="page" id="page-logs">
+  <div class="topbar"><div class="bk" onclick="openPage('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">错误日志</div></div>
+  <div class="body">
+    <div class="grp">
+      <div class="seg">
+        <div id="lg-server" class="on" onclick="switchLogSrc('server')">云上（她）</div>
+        <div id="lg-client" onclick="switchLogSrc('client')">手机（App）</div>
+      </div>
+      <div class="hint">云上＝她脑子那边出的错（欠费、模型名错、生图失败）。手机＝这个 App 自己出的错（连不上、页面报错）。</div>
+    </div>
+    <div class="logbox" id="logBox">加载中…</div>
+    <div class="grp">
+      <button class="sbtn green" onclick="exportLog()">导出到手机（下载目录）</button>
+      <button class="sbtn" onclick="shareLog()">发给别人（微信/邮件…）</button>
+      <button class="sbtn gray" onclick="uploadLog()">把手机日志传到云上</button>
+      <button class="sbtn gray" onclick="clearLog()">清空当前这份</button>
+      <div class="hint" id="logHint"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 底部 Tab -->
+<div class="tabbar" id="tabbar">
+  <div class="tab on" id="tab-wx" onclick="switchTab('wx')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8.5 3C4.9 3 2 5.5 2 8.6c0 1.8 1 3.4 2.5 4.4l-.6 2 2.2-1.1c.6.2 1.3.3 2 .3h.4A5.5 5.5 0 0 1 8.3 12c0-3 2.9-5.4 6.4-5.4h.3C14.4 4.4 11.7 3 8.5 3zm10.3 6.1c-3 0-5.4 2-5.4 4.5s2.4 4.5 5.4 4.5c.5 0 1-.1 1.5-.2l1.8.9-.5-1.6c1.2-.8 2-2.1 2-3.6 0-2.5-2.4-4.5-5.4-4.5z"/></svg>
+    <span>聊天</span></div>
+  <div class="tab" id="tab-contacts" onclick="switchTab('contacts')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3.3 0-8 1.7-8 5v2h16v-2c0-3.3-4.7-5-8-5z"/></svg>
+    <span>通讯录</span></div>
+  <div class="tab" id="tab-discover" onclick="switchTab('discover')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm4.3 5.7-2.6 6.1-6.1 2.6 2.6-6.1z"/></svg>
+    <span>发现</span></div>
+  <div class="tab" id="tab-me" onclick="switchTab('me')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3.3 0-8 1.7-8 5v3h16v-3c0-3.3-4.7-5-8-5z"/></svg>
+    <span>我</span></div>
+</div>
+
+<!-- 全屏看图 -->
+<div id="viewer"><img id="viewerImg"></div>
+
+<!-- 更新弹窗 -->
+<div id="updDlg">
+  <div class="box">
+    <div style="padding:20px 16px 8px">
+      <div style="font-size:16.5px;font-weight:500">发现新版本</div>
+      <div id="updName" style="font-size:12.5px;color:#888;margin-top:6px"></div>
+      <div style="font-size:12.5px;color:#666;margin-top:8px">包含最新功能与问题修复</div>
+    </div>
+    <div style="border-top:0.5px solid #eee;display:flex;margin-top:10px">
+      <div style="flex:1;padding:13px;font-size:15px;color:#666" onclick="updLater()">稍后更新</div>
+      <div style="flex:1;padding:13px;font-size:15px;color:#07c160;border-left:0.5px solid #eee" onclick="updNow()">立即更新</div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fpick" accept="image/*" style="display:none">
+<div id="toast"></div>
+
+<script>
+/* ================= 基础 ================= */
+const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
+const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
+const APP_CODE  = 13;   // 13 = 模型设置页 + 错误日志页（2026-09-29）
+let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
+let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
+const $ = id => document.getElementById(id);
+function api(p) { return BASE + p + (p.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN); }
+let tipTimer = null;
+function tip(msg, ms) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(tipTimer); tipTimer = setTimeout(() => t.style.display = 'none', ms || 2200);
+}
+function fmtT(t) {
+  if (!t) return '';
+  const now = new Date(), d = new Date(String(t).replace(' ', 'T'));
+  if (isNaN(d)) return String(t).slice(5, 16);
+  const sameDay = d.toDateString() === now.toDateString();
+  const hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  if (sameDay) return hm;
+  return (d.getMonth() + 1) + '-' + d.getDate() + ' ' + hm;
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+// 历史里他的消息会被服务端塞进一些"给她的提示"：视觉描述、（发一张图给她看）等。
+// 这些是他让她"看到/知道"的内部标记，不该出现在他自己的气泡里 —— 一律剥掉，留他自己打的字。
+function cleanMine(s) {
+  return String(s == null ? '' : s)
+    .replace(/（他发的图：[\s\S]*?）/g, '')
+    .replace(/（发一张图给她看）/g, '')
+    .replace(/（他发了张图片）/g, '')
+    .replace(/（他连着发了几条，是同一件事）/g, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
+/* ================= 错误记录（App 自己出的错） ================= */
+// 手机上出错是看不见的：没有控制台，只能看到"她不回话"或者按钮点了没反应。
+// 所以这里把每次报错、每次请求失败都存进 localStorage（最多 200 条），
+// 设置页 → 错误日志 里能看、能导成 txt 发过来 —— 不用再猜是哪一步炸的。
+const LOGKEY = 'zx_errlog';
+function errLocal(where, e, level) {
+  try {
+    let msg = '', trace = '';
+    if (e && e.message) msg = String(e.message);
+    else if (typeof e === 'string') msg = e;
+    else msg = String(e || '');
+    if (e && e.error && e.error.stack) trace = String(e.error.stack).slice(0, 600);
+    else if (e && e.stack) trace = String(e.stack).slice(0, 600);
+    const d = new Date(), p = n => ('0' + n).slice(-2);
+    const items = JSON.parse(localStorage.getItem(LOGKEY) || '[]');
+    items.push({
+      t: d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+         ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()),
+      level: level || 'ERROR', where: String(where).slice(0, 60),
+      msg: msg.slice(0, 400), trace: trace,
+    });
+    while (items.length > 200) items.shift();
+    localStorage.setItem(LOGKEY, JSON.stringify(items));
+  } catch (_) { /* 记日志这件事自己绝不能再抛错，否则会把正常流程带崩 */ }
+}
+function errLocalList() {
+  try { const a = JSON.parse(localStorage.getItem(LOGKEY) || '[]'); a.reverse(); return a; }
+  catch (_) { return []; }
+}
+window.addEventListener('error', e => errLocal('页面', e.error || e.message));
+window.addEventListener('unhandledrejection', e => errLocal('异步', e.reason));
+// 包一层 fetch：所有网络失败自动记一笔（省得在每个调用点手写 try）
+const _rawFetch = window.fetch.bind(window);
+window.fetch = function (u, o) {
+  const tag = String(u || '').split('?')[0].replace(/^https?:\/\/[^/]+/, '');
+  return _rawFetch(u, o).then(function (r) {
+    if (r && r.status >= 500) errLocal('服务端' + r.status, tag + ' → HTTP ' + r.status, 'WARN');
+    return r;
+  }, function (err) {
+    errLocal('连不上', tag + ' → ' + ((err && err.message) || err), 'WARN');
+    throw err;
+  });
+};
+
+/* ================= 页面导航 ================= */
+let curPage = 'list';
+const BACK_MAP = { chat: 'list', moments: 'discover', settings: 'me', profile: 'contacts', diary: 'discover', models: 'settings', logs: 'settings' };
+function openPage(p) {
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('on'));
+  $('page-' + p).classList.add('on');
+  curPage = p;
+  const hideTab = ['chat', 'moments', 'settings', 'profile', 'diary',
+                   'models', 'logs'].indexOf(p) >= 0;
+  $('tabbar').style.display = hideTab ? 'none' : 'flex';
+  document.body.classList.toggle('notab', hideTab);
+  if (p === 'chat') loadHistory(true);
+  if (p === 'moments') loadMoments();
+  if (p === 'diary') loadDiaryList();
+  if (p === 'settings') loadPersonas();
+  if (p === 'discover') switchTab('discover');
+}
+function switchTab(t) {
+  // 必须先清掉所有 page 的 on：否则从聊天页返回时 page-chat 还留在最上层盖住列表
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('on'));
+  $('page-' + (t === 'wx' ? 'list' : t)).classList.add('on');
+  ['wx', 'contacts', 'discover', 'me'].forEach(k => $('tab-' + k).classList.toggle('on', k === t));
+  curPage = t === 'wx' ? 'list' : t;
+  $('tabbar').style.display = 'flex';
+  document.body.classList.remove('notab');
+}
+function androidBack() {
+  if ($('viewer').style.display === 'flex') { $('viewer').style.display = 'none'; return 'true'; }
+  if ($('updDlg').style.display === 'flex') { $('updDlg').style.display = 'none'; return 'true'; }
+  if ($('stkPanel').style.display === 'flex') { $('stkPanel').style.display = 'none'; return 'true'; }
+  if (curPage === 'diary' && $('dRead').style.display === 'block') { diaryBack(); return 'true'; }
+  const back = BACK_MAP[curPage];
+  if (back) {
+    if (back === 'list') switchTab('wx');
+    else if (back === 'discover') switchTab('discover');
+    else if (back === 'me') switchTab('me');
+    else openPage(back);
+    return 'true';
+  }
+  return 'false';
+}
+window.view = s => { $('viewerImg').src = s; $('viewer').style.display = 'flex'; };
+$('viewer').onclick = () => $('viewer').style.display = 'none';
+
+/* ================= 头像 / 背景 ================= */
+function herAv() { return localStorage.getItem('zx_herav') || 'logo.png'; }
+function renderAvatars() {
+  const h = herAv();
+  ['ctAv', 'momAv', 'pfAv', 'setHerAv'].forEach(id => {
+    const el = $(id); if (!el) return;
+    el.innerHTML = ''; const im = new Image(); im.src = h; el.appendChild(im);
+  });
+  const my = localStorage.getItem('zx_myav');
+  $('meAv').innerHTML = '';
+  if (my) { const im = new Image(); im.src = my; $('meAv').appendChild(im); }
+  else $('meAv').textContent = '我';
+  $('meNick').textContent = localStorage.getItem('zx_nick') || '我';
+  $('herAvIn').value = '';
+}
+function applyBg() {
+  const bg = localStorage.getItem('zx_bg');
+  $('list').style.background = bg || '#f5f5f5';
+  $('list').style.backgroundSize = 'cover';
+}
+let pickTarget = '', pendingImg = null;
+function pick(t) { pickTarget = t; $('fpick').value = ''; $('fpick').click(); }
+window.__onPickGlobal = function (b64) {
+  const t = pickTarget; pickTarget = '';
+  if (t === 'chat') { pendingImg = b64; $('prevImg').src = 'data:image/jpeg;base64,' + b64; $('imgPrev').style.display = 'flex'; }
+  else if (t === 'sticker') { addCustomSticker(b64); }
+  else if (t === 'myav') { localStorage.setItem('zx_myav', 'data:image/jpeg;base64,' + b64); renderAvatars(); tip('头像已换'); }
+  else if (t === 'herav') { localStorage.setItem('zx_herav', 'data:image/jpeg;base64,' + b64); renderAvatars(); tip('她的头像已换'); }
+  else if (t === 'bg') { localStorage.setItem('zx_bg', 'url(data:image/jpeg;base64,' + b64 + ')'); applyBg(); tip('聊天背景已换'); }
+};
+function cancelImg() { pendingImg = null; $('imgPrev').style.display = 'none'; }
+
+/* ================= 聊天 ================= */
+let lastDay = '', lastT = '';
+function renderAv(role, el) {
+  if (role === 'user') {
+    const my = localStorage.getItem('zx_myav');
+    if (my) { const im = new Image(); im.src = my; el.appendChild(im); } else el.textContent = '我';
+  } else { const im = new Image(); im.src = herAv(); el.appendChild(im); }
+}
+function addMsg(role, text, t, myImgB64, imgIsB64) {
+  if (t) lastT = t;
+  const d = t || '';
+  const day = d.slice(0, 10);
+  if (day && day !== lastDay) {
+    lastDay = day;
+    const el = document.createElement('div');
+    el.className = 'time'; el.textContent = d.slice(5, 16);
+    $('list').appendChild(el);
+  }
+  const row = document.createElement('div');
+  row.className = 'mrow ' + (role === 'user' ? 'me' : 'her');
+  const av = document.createElement('div'); av.className = 'mav'; renderAv(role, av);
+  const bub = document.createElement('div'); bub.className = 'bub';
+  const raw = String(text == null ? '' : text);
+  if (role === 'user' && myImgB64) {
+    // 刚发出去的：imgIsB64=true（本地 base64）；历史记录回传的是文件名，imgIsB64 省略/false
+    const ext = String(myImgB64);
+    let src;
+    if (ext.indexOf('data:') === 0) src = ext;
+    else if (imgIsB64) src = 'data:image/jpeg;base64,' + ext;
+    else src = api('/api/img') + '&name=' + encodeURIComponent(ext);
+    const im = document.createElement('img');
+    im.src = src;
+    im.onload = () => scrollBottom();      // 图片撑高列表后仍要贴回底部
+    im.onclick = () => view(im.src);
+    bub.appendChild(im);
+    const shown = cleanMine(raw);
+    if (shown) { const tx = document.createElement('div'); tx.textContent = shown; bub.appendChild(tx); }
+  } else if (/\[img[:：][^\]]+\]/.test(raw)) {
+    // 正文里夹着 [img:名字]（可能单独一行、也可能前面还有文字）→ 逐段渲染成文字+图
+    const re = /\[img[:：]([^\]]+)\]/g;
+    let idx = 0, m;
+    while ((m = re.exec(raw)) !== null) {
+      const before = raw.slice(idx, m.index).replace(/\n+$/, '');
+      if (before) bub.appendChild(document.createTextNode(before));
+      const im = document.createElement('img');
+      im.src = api('/api/img') + '&name=' + encodeURIComponent(m[1].trim());
+      im.onload = () => scrollBottom();    // 同上：图加载完再贴一次底
+      im.onclick = () => view(im.src);
+      bub.appendChild(im);
+      idx = re.lastIndex;
+    }
+    const after = raw.slice(idx).replace(/^\n+/, '');
+    if (after) bub.appendChild(document.createTextNode(after));
+  } else if (role === 'user') {
+    const shown = cleanMine(raw);
+    bub.textContent = shown || (raw ? '[图片]' : '');
+  } else bub.textContent = raw;
+  let tmr = null;
+  bub.addEventListener('touchstart', () => { tmr = setTimeout(() => copyText(raw), 550); }, { passive: true });
+  bub.addEventListener('touchend', () => clearTimeout(tmr));
+  bub.addEventListener('touchmove', () => clearTimeout(tmr));
+  row.appendChild(av); row.appendChild(bub); $('list').appendChild(row);
+  scrollBottom();
+}
+// 聊天窗吸底：进聊天页/来新消息时贴住最底部；他往上翻历史就停（autoPin=false）。
+// 之前"点进去乱蹦、蹦到上面的聊天记录"的根因：历史里的图片是**异步加载**的，
+// scrollBottom 执行那一刻图片还没撑开高度，等图陆续加载完、整个列表变高，
+// 视口就"飘"到了中间的历史消息里。现在每张图 onload 后只要还处于吸底状态
+// 就再贴一次底，用户往上翻了就不再打扰。
+let autoPin = true;
+function scrollBottom(force) {
+  const b = $('list');
+  if (force) autoPin = true;
+  if (!autoPin) return;
+  b.scrollTop = b.scrollHeight;
+}
+$('list').addEventListener('scroll', () => {
+  const b = $('list');
+  autoPin = b.scrollHeight - b.scrollTop - b.clientHeight < 120;
+});
+function copyText(s) {
+  if (!s) return;
+  if (navigator.clipboard) navigator.clipboard.writeText(s).then(() => tip('已复制'), () => {});
+  else tip('长按选择复制');
+}
+let histSig = '';
+function renderHistory(items) {
+  lastDay = ''; $('list').innerHTML = '';
+  items.forEach(it => addMsg(it.role === 'user' ? 'user' : 'assistant', it.text, it.t, it.role === 'user' ? (it.img || '') : '', false));
+}
+function markSeen(items) {
+  try {
+    const last = items && items.length ? items[items.length - 1] : null;
+    if (last && last.t && window.Android && window.Android.markSeen) window.Android.markSeen(last.t);
+  } catch (e) {}
+}
+async function loadHistory(manual) {
+  try {
+    const r = await fetch(api('/api/history?limit=60'));
+    const d = await r.json();
+    const items = d.items || [];
+    const sig = JSON.stringify(items);
+    if (sig !== histSig) {
+      const nearBottom = $('list').scrollHeight - $('list').scrollTop - $('list').clientHeight < 80;
+      histSig = sig;
+      renderHistory(items);
+      if (nearBottom || manual) scrollBottom(true);   // force：进页面/本来就在底部就吸死
+      markSeen(items);
+      renderSess(items);
+    } else if (manual) renderSess(items);
+  } catch (e) { if (manual) tip('刷新失败，检查网络'); }
+}
+async function sendText(t, img) {
+  $('typing').style.display = 'block';
+  try {
+    const r = await fetch(api('/api/chat'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: t, img: img || null })
+    });
+    const d = await r.json();
+    addMsg('assistant', d.reply || (d.err ? '（出错了：' + d.err + '）' : '…'), '');
+  } catch (e) {
+    addMsg('assistant', '', '');
+    tip('连不上她：去 我-设置-测试连接 看具体原因', 4000);
+  }
+  $('typing').style.display = 'none';
+}
+async function sendMsg() {
+  const t = $('input').value.trim();
+  if (!t && !pendingImg) return;
+  const img = pendingImg; cancelImg();
+  $('input').value = '';
+  addMsg('user', t, '', img, true);
+  sendText(t, img);
+}
+$('sendBtn').onclick = sendMsg;
+$('input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sendMsg(); } });
+$('imgBtn').onclick = () => pick('chat');
+$('stkBtn').onclick = () => {
+  const p = $('stkPanel');
+  p.style.display = p.style.display === 'flex' ? 'none' : 'flex';
+  if (p.style.display === 'flex') loadStickers();
+};
+
+/* ================= 会话列表 ================= */
+function renderSess(items) {
+  const last = items && items.length ? items[items.length - 1] : null;
+  const prev = last ? (last.img && last.role === 'user' ? '[图片]' : String(last.text || '')) : '还没有聊过天，去说第一句吧';
+  const readT = localStorage.getItem('zx_read_t') || '';
+  const unread = last && last.t && last.t !== readT;
+  $('sessList').innerHTML =
+    '<div class="cell" onclick="openChat()">' +
+      '<div class="cav" id="sessAv"></div>' +
+      '<div class="cmain"><div class="crow1"><div class="cname">角色</div>' +
+      '<div class="ctime">' + esc(last ? fmtT(last.t) : '') + '</div></div>' +
+      '<div class="crow2"><div class="cprev">' + esc(prev) + '</div>' +
+      (unread ? '<div class="dot"></div>' : '') + '</div></div></div>' +
+    '<div class="cell" onclick="tip(\'用于中转文件，敬请期待\')">' +
+      '<div class="cav" style="background:#e6f7ff;color:#3aa3ff">传</div>' +
+      '<div class="cmain"><div class="crow1"><div class="cname">文件传输助手</div></div>' +
+      '<div class="crow2"><div class="cprev">支持图片中转（开发中）</div></div></div></div>';
+  const holder = $('sessAv');
+  if (holder) { const im = new Image(); im.src = herAv(); holder.appendChild(im); }
+}
+function openChat() {
+  try {
+    const items = histSig ? JSON.parse(histSig) : [];
+    if (items.length) localStorage.setItem('zx_read_t', items[items.length - 1].t || '');
+  } catch (e) {}
+  openPage('chat');
+}
+
+/* ================= 表情包 ================= */
+let cloudStk = [];
+function customStk() { try { return JSON.parse(localStorage.getItem('zx_mystk') || '[]'); } catch (e) { return []; } }
+function addCustomSticker(b64) {
+  const arr = customStk();
+  if (arr.indexOf(b64) < 0) arr.push(b64);
+  localStorage.setItem('zx_mystk', JSON.stringify(arr));
+  renderStickers(); tip('已加入我的表情包');
+}
+async function loadStickers() {
+  renderStickers();
+  try {
+    const r = await fetch(api('/api/stickers'));
+    const d = await r.json();
+    cloudStk = d.names || [];
+    renderStickers();
+  } catch (e) {}
+}
+function renderStickers() {
+  const g = $('stkGrid'); g.innerHTML = '';
+  customStk().forEach(b64 => {
+    const cell = document.createElement('div'); cell.className = 'stkcell';
+    const im = document.createElement('img'); im.src = 'data:image/jpeg;base64,' + b64;
+    im.onclick = () => sendSticker(b64);
+    const del = document.createElement('div'); del.className = 'del'; del.textContent = '×';
+    del.onclick = e => {
+      e.stopPropagation();
+      localStorage.setItem('zx_mystk', JSON.stringify(customStk().filter(x => x !== b64)));
+      renderStickers();
+    };
+    cell.appendChild(im); cell.appendChild(del); g.appendChild(cell);
+  });
+  const add = document.createElement('div'); add.className = 'stkadd'; add.textContent = '＋';
+  add.onclick = () => pick('sticker');
+  g.appendChild(add);
+  cloudStk.forEach(n => {
+    const im = document.createElement('img');
+    im.src = api('/api/img') + '&name=' + encodeURIComponent(n);
+    im.onclick = async () => {
+      try {
+        const r = await fetch(im.src);
+        const blob = await r.blob();
+        const fr = new FileReader();
+        fr.onload = () => sendSticker(String(fr.result).split(',')[1]);
+        fr.readAsDataURL(blob);
+      } catch (e) { tip('表情取失败了'); }
+    };
+    g.appendChild(im);
+  });
+}
+function sendSticker(b64) {
+  // 表情面板点一下就发出去，之前没有确认——误触一下就会以"他"的名义
+  // 发出一张他自己都不知道的表情包（2026-09-22 用户遇到的"我没发过这张"）。
+  // 加一道确认，成本极低，能拦住绝大多数误触。
+  if (!confirm('把这张表情包发给她？')) return;
+  $('stkPanel').style.display = 'none';
+  addMsg('user', '', '', b64, true);
+  sendText('', b64);
+}
+
+/* ================= 朋友圈 ================= */
+async function loadMoments() {
+  $('momFoot').textContent = '加载中…';
+  try {
+    const r = await fetch(api('/api/moments'));
+    const d = await r.json();
+    const items = d.items || [];
+    const box = $('momList'); box.innerHTML = '';
+    if (!items.length) { $('momFoot').textContent = '她还没发过朋友圈，等她想分享的时候自然会发'; return; }
+    $('momFoot').textContent = '· 到底啦 ·';
+    items.forEach(m => box.appendChild(momentEl(m)));
+  } catch (e) { $('momFoot').textContent = '加载失败，退出重进试试'; }
+}
+function momentEl(m) {
+  const div = document.createElement('div'); div.className = 'moment';
+  const av = document.createElement('div'); av.className = 'mav';
+  const aim = new Image(); aim.src = herAv(); av.appendChild(aim);
+  const body = document.createElement('div'); body.className = 'mbody';
+  let html = '<div class="mtext">' + esc(m.text || '') + '</div>';
+  const imgs = m.imgs || [];
+  if (imgs.length) {
+    html += '<div class="mimgs">' + imgs.map(n =>
+      '<img src="' + esc(api('/api/img') + '&name=' + encodeURIComponent(n)) + '" onclick="view(this.src)">').join('') + '</div>';
+  }
+  html += '<div class="mt">' + esc(fmtT(m.t)) + '</div>';
+  const likes = m.likes || [], cms = m.comments || [];
+  html += '<div class="mact"><span data-mid="' + esc(m.id) + '" data-act="like">♥ 赞' + (likes.length ? ' (' + likes.length + ')' : '') + '</span>' +
+          '<span data-mid="' + esc(m.id) + '" data-act="cm">💬 评论</span></div>';
+  body.innerHTML = html;
+  if (likes.length || cms.length) {
+    const box = document.createElement('div');
+    let inner = '';
+    if (likes.length) inner += '<div class="mlike">♥ ' + likes.map(esc).join('、') + '</div>';
+    cms.forEach(c => { inner += '<div class="mcm"><b>' + esc(c.who) + '：</b>' + esc(c.text) + '</div>'; });
+    box.innerHTML = inner;
+    body.appendChild(box);
+  }
+  const cin = document.createElement('div'); cin.className = 'mcin'; cin.style.display = 'none';
+  cin.innerHTML = '<input placeholder="评论…"><button>发送</button>';
+  cin.querySelector('button').onclick = () => {
+    const v = cin.querySelector('input').value.trim();
+    if (!v) return;
+    cin.querySelector('input').value = '';
+    commentMoment(m.id, v);
+  };
+  body.appendChild(cin);
+  body.querySelectorAll('.mact span').forEach(sp => {
+    sp.onclick = () => {
+      if (sp.dataset.act === 'like') doLike(m.id);
+      else {
+        document.querySelectorAll('.mcin').forEach(el => el.style.display = 'none');
+        cin.style.display = 'flex';
+        cin.querySelector('input').focus();
+      }
+    };
+  });
+  div.appendChild(av); div.appendChild(body);
+  return div;
+}
+async function doLike(id) {
+  try {
+    await fetch(api('/api/moment/like'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, who: localStorage.getItem('zx_nick') || '他' }) });
+    tip('已赞'); loadMoments();
+  } catch (e) { tip('操作失败'); }
+}
+async function commentMoment(id, text) {
+  try {
+    tip('发送中…');
+    const r = await fetch(api('/api/moment/comment'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, text: text, who: '我' }) });
+    const d = await r.json();
+    loadMoments();
+    if (d.reply) setTimeout(() => tip('她回复了：' + d.reply, 4000), 800);
+  } catch (e) { tip('操作失败'); }
+}
+
+/* ================= 人设切换 ================= */
+let personaKeys = {};
+async function loadPersonas() {
+  const cur = $('personaCur'), box = $('personaList');
+  cur.value = '加载中…'; box.innerHTML = '';
+  try {
+    const r = await fetch(api('/api/persona'));
+    const d = await r.json();
+    cur.value = d.name || '角色';
+    personaKeys = {};
+    (d.presets || []).forEach(p => {
+      personaKeys[p.key] = p;
+      const row = document.createElement('div');
+      row.className = 'setrow';
+      row.style.borderTop = '1px solid #f0f0f0';
+      row.onclick = () => applyPersona(p.key, p.label);
+      row.innerHTML = '<div style="flex:1"><div style="font-size:15px;color:#191919">' + esc(p.label || p.key) +
+        (p.key === d.key ? ' <span style="color:#07c160;font-size:12px">· 当前</span>' : '') +
+        '</div><div style="font-size:12px;color:#9c9c9c;margin-top:2px">' + esc(p.desc || '') + '</div></div>';
+      box.appendChild(row);
+    });
+  } catch (e) { cur.value = '加载失败'; }
+}
+async function applyPersona(key, label) {
+  if (!confirm('换成「' + (label || key) + '」？她接下来的说话方式会变，但你们聊过的还都记得。')) return;
+  tip('切换中…');
+  try {
+    const r = await fetch(api('/api/persona/apply'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key }) });
+    const d = await r.json();
+    if (d.ok) { tip('已切换：' + (d.name || label)); loadPersonas(); }
+    else tip(d.err || '切换失败');
+  } catch (e) { tip('切换失败，检查网络'); }
+}
+
+/* ================= 日记 ================= */
+let diaryDays = [];
+async function loadDiaryList() {
+  $('dFoot').textContent = '加载中…';
+  try {
+    const r = await fetch(api('/api/diary/list'));
+    const d = await r.json();
+    diaryDays = (d.days || []).slice().reverse();   // 新→旧
+    const box = $('dList'); box.innerHTML = '';
+    if (!diaryDays.length) {
+      $('dFoot').textContent = '她还没写日记呢';
+      $('dRead').style.display = 'none'; $('dList').style.display = 'block';
+      return;
+    }
+    diaryDays.forEach(day => {
+      const c = document.createElement('div'); c.className = 'cell';
+      c.innerHTML = '<div class="cav" style="background:#e9e3ff;color:#7e6bf2">日</div>'
+        + '<div class="cmain"><div class="cname">' + esc(day) + '</div></div><span class="arrow">›</span>';
+      c.onclick = () => openDiary(day);
+      box.appendChild(c);
+    });
+    $('dFoot').textContent = '· 到底啦 ·';
+    $('dRead').style.display = 'none'; $('dList').style.display = 'block';
+  } catch (e) { $('dFoot').textContent = '加载失败，退出重进试试'; }
+}
+async function openDiary(day) {
+  try {
+    const r = await fetch(api('/api/diary/read?date=' + encodeURIComponent(day)));
+    const d = await r.json();
+    $('dDate').textContent = day;
+    $('dBody').textContent = d.body || '（这一页是空的）';
+    $('dList').style.display = 'none'; $('dRead').style.display = 'block';
+  } catch (e) { tip('读取失败'); }
+}
+function diaryBack() { $('dRead').style.display = 'none'; $('dList').style.display = 'block'; }
+
+/* ================= 模型 ================= */
+// 她说话用的模型原来写死在云上的配置里，手机上改不了。这里做成四个下拉：
+// 对话 / 看图 / 生图 / 语音 —— 语音那个还没做，先置灰占位。
+let mProv = 'siliconflow', mGroups = {}, mCur = {}, mProvs = [];
+
+function openModels() { openPage('models'); loadModelCfg(false); }
+
+async function loadModelCfg(force) {
+  const el = $('modelSrc'); if (el) el.textContent = '拉取中…';
+  try {
+    const r = await fetch(api('/api/models' + (force ? '?force=1' : '')));
+    const d = await r.json();
+    mCur = d.current || {}; mGroups = d.groups || {}; mProvs = d.providers || [];
+    mProv = mCur.provider || 'siliconflow';
+    $('mBase').value = mCur.api_base || '';
+    $('mKey').value = mCur.api_key || '';
+    markProvider(mProv);
+    // 视觉模型也能聊天，所以对话那栏把 VL 系列一起列出来
+    fillSel('mChat', (mGroups.chat || []).concat(mGroups.vision || []),
+            mCur.chat, '（先拉列表）');
+    fillSel('mVision', mGroups.vision || [], mCur.vision, '（同上）');
+    fillSel('mImage', mGroups.image || [], mCur.image, '（同上）');
+    fillSel('mAudio', mGroups.audio || [], mCur.audio, '还没做，先留位置');
+    const SRC = { online: '刚从服务商拉到的最新列表', cache: '用的缓存，点下面可重新拉',
+                  fallback: '拉不到，先用内置清单（可能不全）' };
+    $('modelSrc').textContent = (SRC[d.source] || d.source || '') + '｜共 ' +
+      (d.count || 0) + ' 个' + (d.err ? '（' + d.err + '）' : '');
+    $('modelSum').textContent = (mCur.provider_name || '') + ' · ' +
+      (mCur.chat || '未设置');
+  } catch (e) {
+    if (el) el.textContent = '连不上她，拉不到模型列表：' + ((e && e.message) || e);
+  }
+}
+
+function fillSel(id, list, cur, ph) {
+  const s = $(id); if (!s) return;
+  const arr = (list || []).slice();
+  if (cur && arr.indexOf(cur) < 0) arr.unshift(cur);   // 当前值不在列表里也要显示
+  s.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = ph || '（不选）';
+  s.appendChild(o0);
+  arr.forEach(function (m) {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    s.appendChild(o);
+  });
+  s.value = cur || '';
+}
+
+function markProvider(p) {
+  ['siliconflow', 'custom'].forEach(function (k) {
+    const el = $('prov-' + k); if (el) el.classList.toggle('on', k === p);
+  });
+  $('provHint').textContent = p === 'custom'
+    ? '自定义：任何 OpenAI 兼容的地址（结尾一般是 /v1）。拉不到列表也照样能用，手填模型名。'
+    : '硅基流动：默认这家，模型列表直接从它拉（对话/看图/生图/语音分开列）。';
+}
+
+function setProvider(p) {
+  mProv = p; markProvider(p);
+  if (p === 'siliconflow') {
+    const sf = (mProvs || []).filter(x => x.key === 'siliconflow')[0];
+    if (sf && sf.base) $('mBase').value = sf.base;
+  }
+}
+
+async function saveModels() {
+  const out = $('mResult');
+  const payload = {
+    provider: mProv,
+    api_base: ($('mBase').value || '').trim(),
+    api_key: ($('mKey').value || '').trim(),
+    chat: $('mChat').value || '',
+    vision: $('mVision').value || '',
+    image: $('mImage').value || '',
+    audio: $('mAudio').value || '',
+    vision_enabled: !!$('mVision').value,
+  };
+  if (!payload.api_base || !payload.api_key) {
+    out.textContent = '地址和密钥都得填，不然她没法说话'; return;
+  }
+  if (!payload.chat) { out.textContent = '至少选一个对话模型'; return; }
+  out.textContent = '保存中…';
+  try {
+    const r = await fetch(api('/api/models/apply'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      out.textContent = (d.changed && d.changed.length)
+        ? ('已生效：' + d.changed.join('；')) : '没有改动';
+      mCur = d.current || mCur;
+      $('modelSum').textContent = (mCur.provider_name || '') + ' · ' +
+        (mCur.chat || '未设置');
+      tip('换好了，她下一句就是新模型说的', 3000);
+    } else out.textContent = '没保存成：' + (d.err || '未知原因');
+  } catch (e) { out.textContent = '保存失败：' + ((e && e.message) || e); }
+}
+
+/* ================= 错误日志 ================= */
+let logSrc = 'server';
+
+function openLogs() { openPage('logs'); loadLogs(); }
+
+function switchLogSrc(s) {
+  logSrc = s;
+  ['server', 'client'].forEach(function (k) {
+    const el = $('lg-' + k); if (el) el.classList.toggle('on', k === s);
+  });
+  loadLogs();
+}
+
+function fmtLog(items) {
+  if (!items || !items.length) return '（这份日志是空的 —— 目前没记到错误）\n';
+  return items.map(function (it) {
+    return '[' + (it.t || '-') + '] ' + (it.level || '') + ' | ' +
+      (it.where || '-') + '\n  ' + (it.msg || '') +
+      (it.trace ? '\n  ' + String(it.trace).replace(/\n/g, '\n  ') : '');
+  }).join('\n\n');
+}
+
+async function loadLogs() {
+  const box = $('logBox'); box.textContent = '加载中…';
+  if (logSrc === 'client') {
+    const a = errLocalList();
+    box.textContent = fmtLog(a);
+    $('logHint').textContent = '手机端共 ' + a.length + ' 条（上限 200，满了丢最早的）';
+    return;
+  }
+  try {
+    const r = await fetch(api('/api/logs?src=server&n=200'));
+    const d = await r.json();
+    box.textContent = fmtLog(d.items || []);
+    const st = d.stats || {};
+    $('logHint').textContent = '云上 ' + (st.server || 0) + ' 条 ／ 手机 ' +
+      (st.client || 0) + ' 条';
+  } catch (e) {
+    box.textContent = '拉不到云上日志：' + ((e && e.message) || e) +
+      '\n\n下面是手机端的：\n\n' + fmtLog(errLocalList());
+  }
+}
+
+function logFileName() {
+  const d = new Date(), p = n => ('0' + n).slice(-2);
+  return '角色错误日志-' + (logSrc === 'server' ? '云上' : '手机') + '-' +
+    d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+    p(d.getHours()) + p(d.getMinutes()) + '.txt';
+}
+
+async function currentLogText() {
+  if (logSrc === 'client') return fmtLog(errLocalList());
+  try {
+    const r = await fetch(api('/api/logs?src=server&n=500&fmt=text'));
+    const d = await r.json();
+    return d.text || '（空）';
+  } catch (e) { return fmtLog(errLocalList()); }
+}
+
+function copyText(t) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+  } catch (e) {}
+}
+
+async function exportLog() {
+  const text = await currentLogText(), name = logFileName();
+  if (window.Android && window.Android.saveLog) {
+    window.Android.saveLog(name, text);
+    tip('已存到「下载」目录：' + name, 3500); return;
+  }
+  copyText(text); tip('浏览器里存不了文件，已复制到剪贴板', 3000);
+}
+
+async function shareLog() {
+  const text = await currentLogText();
+  if (window.Android && window.Android.shareText) { window.Android.shareText(text); return; }
+  copyText(text); tip('已复制到剪贴板', 2500);
+}
+
+async function uploadLog() {
+  const items = errLocalList();
+  if (!items.length) { tip('手机端没有错误记录'); return; }
+  try {
+    const r = await fetch(api('/api/logs'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items }),
+    });
+    const d = await r.json();
+    tip(d.ok ? ('已传 ' + (d.saved || 0) + ' 条到云上') : ('上传失败：' + (d.err || '')));
+  } catch (e) { tip('上传失败：' + ((e && e.message) || e)); }
+}
+
+async function clearLog() {
+  if (logSrc === 'client') {
+    localStorage.removeItem(LOGKEY); loadLogs(); tip('手机日志已清空'); return;
+  }
+  try {
+    const r = await fetch(api('/api/logs/clear'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src: 'server' }),
+    });
+    const d = await r.json();
+    tip(d.ok ? '云上日志已清空' : '清空失败');
+    loadLogs();
+  } catch (e) { tip('清空失败：' + ((e && e.message) || e)); }
+}
+
+/* ================= 设置 / 更新 ================= */
+function openSettings() { $('baseIn').value = BASE; $('tokenIn').value = TOKEN; $('connResult').textContent = ''; openPage('settings'); }
+function openProfile() { renderAvatars(); openPage('profile'); }
+function openStk() { switchTab('wx'); openPage('chat'); $('stkPanel').style.display = 'flex'; loadStickers(); }
+function openMoments() { openPage('moments'); }
+function saveSetup() {
+  BASE = ($('baseIn').value || '').trim().replace(/\/+$/, '') || DEF_BASE;
+  TOKEN = ($('tokenIn').value || '').trim() || DEF_TOKEN;
+  localStorage.setItem('zx_base', BASE);
+  localStorage.setItem('zx_token', TOKEN);
+  if (window.Android && window.Android.saveConn) { try { window.Android.saveConn(BASE, TOKEN); } catch (e) {} }
+  tip('已保存，重新连接中');
+  histSig = ''; loadHistory(true);
+}
+async function testConn() {
+  const el = $('connResult'); el.textContent = '测试中…';
+  try {
+    const t0 = Date.now();
+    const r = await fetch(api('/api/persona'));
+    const d = await r.json();
+    el.textContent = '✓ 连接正常（' + (d.name || '?') + '，' + (Date.now() - t0) + 'ms）';
+  } catch (e) { el.textContent = '✗ 连不上：' + (e.message || e); }
+}
+let updUrl = '';
+function showUpdDlg(name, url) { updUrl = url; $('updName').textContent = name; $('updDlg').style.display = 'flex'; }
+function updLater() { $('updDlg').style.display = 'none'; }
+function updNow() {
+  $('updDlg').style.display = 'none';
+  if (window.Android && window.Android.installUpdate) {
+    window.Android.installUpdate(updUrl);
+    tip('开始下载，完成后点通知安装', 4000);
+  } else tip('请更新 App 后再使用此功能');
+}
+async function checkUpdate(manual) {
+  try {
+    const r = await fetch(api('/api/app/version'));
+    const d = await r.json();
+    if ((d.code || 0) > APP_CODE) {
+      showUpdDlg(d.name || ('v' + d.code), BASE + (d.url || '/api/app.apk') + '?token=' + encodeURIComponent(TOKEN));
+    } else if (manual) tip('已经是最新版本啦');
+  } catch (e) { if (manual) tip('检查失败，稍后再试'); }
+}
+
+/* ================= 启动 ================= */
+(async function init() {
+  renderAvatars(); applyBg();
+  if (!localStorage.getItem('zx_splashed')) {
+    localStorage.setItem('zx_splashed', '1');
+    setTimeout(() => {
+      const sp = $('splash'); sp.style.opacity = '0';
+      setTimeout(() => sp.style.display = 'none', 480);
+    }, 900);
+  } else $('splash').style.display = 'none';
+  loadHistory(true);
+  loadStickers();
+  checkUpdate(false);
+  setInterval(() => { if (curPage === 'chat' || curPage === 'list') loadHistory(); }, 12000);
+})();
+</script>
+</body>
+</html>

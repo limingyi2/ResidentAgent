@@ -1,0 +1,270 @@
+package com.zhixia.chat;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.util.Base64;
+import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.widget.Toast;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+
+/** 她的专属聊天 App。界面 = assets/chat.html；常驻轮询在 PollService。 */
+public class MainActivity extends Activity {
+
+    private WebView web;
+    private ValueCallback<Uri[]> filePathCallback;
+    private static final int REQ_PICK = 1001;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        web = new WebView(this);
+        setContentView(web);
+
+        WebSettings s = web.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        // 界面是 file:// 本地页，要请求云机接口（跨域）——不开这两个
+        // 开关，fetch 会被同源策略静默拦截，表现为"Failed to fetch"
+        s.setAllowUniversalAccessFromFileURLs(true);
+        s.setAllowFileAccessFromFileURLs(true);
+        s.setLoadWithOverviewMode(false);
+        s.setUseWideViewPort(true);
+        s.setSupportZoom(false);
+        s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        s.setUserAgentString(s.getUserAgentString() + " ZhixiaChat/1.0");
+
+        web.addJavascriptInterface(new JsBridge(), "Android");
+        web.setWebViewClient(new android.webkit.WebViewClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView v,
+                                             ValueCallback<Uri[]> cb,
+                                             FileChooserParams params) {
+                filePathCallback = cb;
+                Intent i = params.createIntent();
+                i.setType("image/*");
+                try {
+                    startActivityForResult(i, REQ_PICK);
+                } catch (Exception e) {
+                    filePathCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 7);
+        }
+
+        // 常驻轮询服务：App 在后台/被划掉也继续检查她的新消息
+        Intent svc = new Intent(this, PollService.class);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc);
+        else startService(svc);
+
+        web.loadUrl("file:///android_asset/chat.html");
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_PICK) return;
+        Uri[] uris = null;
+        if (res == RESULT_OK && data != null) {
+            if (data.getClipData() != null && data.getClipData().getItemCount() > 0) {
+                uris = new Uri[]{data.getClipData().getItemAt(0).getUri()};
+            } else if (data.getData() != null) {
+                uris = new Uri[]{data.getData()};
+            }
+        }
+        ValueCallback<Uri[]> cb = filePathCallback;
+        filePathCallback = null;
+        if (cb != null) cb.onReceiveValue(uris);
+
+        if (uris != null && uris.length > 0) {
+            String b64 = readImageBase64(uris[0]);
+            if (b64 != null) {
+                web.evaluateJavascript(
+                        "window.__onPickGlobal ? window.__onPickGlobal('" + b64 + "')"
+                        + " : (window.__onPick && window.__onPick('" + b64 + "'))",
+                        null);
+            } else {
+                Toast.makeText(this, "这张图读不出来，换一张试试", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    /** 微信式返回：聊天→列表、朋友圈→发现、设置→我，最后才退出 App */
+    @Override
+    public void onBackPressed() {
+        web.evaluateJavascript("androidBack()", value -> {
+            if (value == null || !value.contains("true")) {
+                // 退到后台而不是销毁：常驻服务继续收她的消息
+                Intent home = new Intent(Intent.ACTION_MAIN);
+                home.addCategory(Intent.CATEGORY_HOME);
+                startActivity(home);
+            }
+        });
+    }
+
+    private String readImageBase64(Uri uri) {
+        try {
+            InputStream in = getContentResolver().openInputStream(uri);
+            if (in == null) return null;
+            Bitmap bm = android.graphics.BitmapFactory.decodeStream(in);
+            in.close();
+            if (bm == null) return null;
+            int w = bm.getWidth(), h = bm.getHeight();
+            float scale = Math.min(1f, 1280f / Math.max(w, h));
+            if (scale < 1f) {
+                bm = Bitmap.createScaledBitmap(bm, Math.round(w * scale),
+                        Math.round(h * scale), true);
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            bm.compress(Bitmap.CompressFormat.JPEG, 82, out);
+            return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private class JsBridge {
+        @JavascriptInterface
+        public void toast(String msg) {
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, msg,
+                    Toast.LENGTH_SHORT).show());
+        }
+
+        /** 页面读过消息后同步"读到哪了"，服务据此判断要不要弹通知 */
+        @JavascriptInterface
+        public void markSeen(String t) {
+            getSharedPreferences("zx", MODE_PRIVATE)
+                    .edit().putString("last_seen_t", t == null ? "" : t).apply();
+        }
+
+        /** 页面里改了连接地址/口令时，同步给常驻服务 */
+        @JavascriptInterface
+        public void saveConn(String base, String token) {
+            getSharedPreferences("zx", MODE_PRIVATE).edit()
+                    .putString("base", base).putString("token", token).apply();
+        }
+
+        /** 内置更新：跳到浏览器下载新 APK */
+        @JavascriptInterface
+        public void openUrl(String url) {
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "没有能打开链接的应用",
+                            Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        /** 内置更新：App 内直接下载新 APK（系统下载器，完成后点通知安装） */
+        @JavascriptInterface
+        public void installUpdate(String url) {
+            runOnUiThread(() -> {
+                try {
+                    android.app.DownloadManager.Request req =
+                            new android.app.DownloadManager.Request(Uri.parse(url));
+                    req.setTitle("角色 新版本");
+                    req.setDescription("下载完成后点通知安装");
+                    req.setMimeType("application/vnd.android.package-archive");
+                    req.setNotificationVisibility(
+                            android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                    android.app.DownloadManager dm =
+                            (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                    if (dm != null) {
+                        dm.enqueue(req);
+                        Toast.makeText(MainActivity.this, "开始下载，完成后点通知安装",
+                                Toast.LENGTH_LONG).show();
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "下载失败：" + e.getMessage(),
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+
+        /** 导出错误日志：写成 txt 放到「下载」目录。
+         * Android 10 以上走 MediaStore，不用申请存储权限；老机器退到 App 自己的
+         * 目录（在 Android/data/下面，文件管理器能翻到）。 */
+        @JavascriptInterface
+        public void saveLog(String name, String text) {
+            String n = (name == null || name.trim().isEmpty())
+                    ? "zhixia_log.txt" : name.trim();
+            String body = (text == null) ? "" : text;
+            String where;
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    android.content.ContentValues cv = new android.content.ContentValues();
+                    cv.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, n);
+                    cv.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain");
+                    cv.put(android.provider.MediaStore.Downloads.IS_PENDING, 1);
+                    Uri uri = getContentResolver().insert(
+                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                    if (uri == null) throw new Exception("写不进下载目录");
+                    OutputStream os = getContentResolver().openOutputStream(uri);
+                    if (os == null) throw new Exception("打不开输出流");
+                    os.write(body.getBytes("UTF-8"));
+                    os.flush();
+                    os.close();
+                    cv.clear();
+                    cv.put(android.provider.MediaStore.Downloads.IS_PENDING, 0);
+                    getContentResolver().update(uri, cv, null, null);
+                    where = "已保存到「下载」目录：" + n;
+                } else {
+                    File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS);
+                    if (dir != null && !dir.exists()) dir.mkdirs();
+                    File f = new File(dir, n);
+                    FileOutputStream fos = new FileOutputStream(f);
+                    fos.write(body.getBytes("UTF-8"));
+                    fos.flush();
+                    fos.close();
+                    where = "已保存到 " + f.getAbsolutePath();
+                }
+            } catch (Exception e) {
+                where = "保存失败：" + e.getMessage();
+            }
+            final String msg = where;
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, msg,
+                    Toast.LENGTH_LONG).show());
+        }
+
+        /** 把日志当一段文字分享出去（微信 / 邮件 / 备忘录都行）。
+         * 走系统分享，不用任何权限 —— 出问题时最快的一条路。 */
+        @JavascriptInterface
+        public void shareText(String text) {
+            runOnUiThread(() -> {
+                try {
+                    Intent i = new Intent(Intent.ACTION_SEND);
+                    i.setType("text/plain");
+                    i.putExtra(Intent.EXTRA_SUBJECT, "角色 错误日志");
+                    i.putExtra(Intent.EXTRA_TEXT, (text == null) ? "" : text);
+                    startActivity(Intent.createChooser(i, "把日志发给…"));
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "分享失败：" + e.getMessage(),
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+    }
+}

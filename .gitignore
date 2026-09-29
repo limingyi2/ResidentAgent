@@ -1,0 +1,80 @@
+# ===== 密钥与凭据：绝对不能进仓库 =====
+deploy/sshkeys/
+*.pem
+*.key
+id_rsa*
+# 部署包里可能夹带私钥与配置文件
+*.zip
+
+# API key 写在 config.json 里，一律忽略，改推 config.example.json
+brain/config/config.json
+config.json
+# backup 里同样躺着完整的 key，必须挡
+*.bak*
+*.bak_*
+
+# ===== 私人素材：人脸参考图 / 立绘 / 生成图 =====
+brain/config/look_refs/
+brain/assets/
+deploy/generated-images/
+**/look_refs/
+*.jpg
+*.jpeg
+*.png
+*.webp
+
+# ===== 运行时数据：记忆 / 日记 / 聊天记录 / 上传 =====
+brain/data/
+data/
+
+# ===== 阁楼：历史遗留集中存放（2026-09-29 整理）=====
+# 集中放被取代/移除的老文件、清理前的备份、重复副本。
+# 只做留存不做参考，除非要考古否则不用打开，整目录不入库。
+_attic/
+# 桌宠摘掉的本地模块 / 本地兜底大脑（2026-09-29）
+pet/mobile_server.py
+
+# ===== 打包流水线的活跃输入（不是历史遗留，别归档、别删）=====
+# _chat.html 是前端母本：改完跑 .workbuddy\scripts\tools\_repackage.py 打进 APK。
+# 它与 android-app\app\src\main\assets\chat.html 内容必须一致（那份入库存档，
+# 供 gradle 正式构建用），母本不入库 —— 避免同一份前端在仓库里存两次。
+_chat.html
+# 源 APK（deploy\角色.apk 的副本，_repackage.py 拿它当底）已被上面 *.apk 规则覆盖
+
+# ===== 构建产物 =====
+*.apk
+*.aab
+android-app/.gradle/
+android-app/app/build/
+android-app/build/
+android-app/local.properties
+build/
+dist/
+
+# ===== Python =====
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# ===== 本机专用启动脚本：含服务器地址与私钥路径，不入库 =====
+# 仓库只保留 run_pet.example.bat 作为模板，本机真实脚本改好后无需提交
+pet/launchers/run_pet.bat
+pet/launchers/run_pet_cloud.bat
+
+# ===== 已下架的旧人设（恋爱框架），不对外 =====
+*.retired*
+
+# ===== 不进公开仓库的文档（文件留在本地 docs\，只是不提交）=====
+# 记忆库清单：逐条列出真实聊天的私人记忆内容，仅供自用
+docs/记忆库清单.md
+# 2026-09-17 的项目快照，文档自述已过时（本地 4B / QLoRA / Unsloth 均已移除），公开会误导读者
+docs/角色项目_进度诊断与下一步.md
+
+# ===== 会话 / 临时 =====
+.workbuddy/
+*.log
+_history*
+_smoke*

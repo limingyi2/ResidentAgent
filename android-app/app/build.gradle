@@ -1,0 +1,34 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.zhixia.chat'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.zhixia.chat"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 走的是 Tailscale 内网地址，HTTP 明文即可
+    // （只在"仅你自己的加密小网"里，不经过公网）
+}
+
+dependencies {
+    // 只用系统自带的 WebView，不引任何三方库
+}
