@@ -55,6 +55,20 @@ def _day_segment(hour):
         return "晚上"
     return "深夜"
 
+
+# 对话记录里每条开头的方括号是时间标签（见 Brain._stamp / seed_history）。
+# 不说明的话模型会犯两种错（2026-09-29 都实测到了）：
+#   1) 把标签当正文一起模仿，回话时开头也写个 [09-29 06:18]；
+#   2) 直接忽略它，把凌晨说的"约定的那个周末"当成此刻正在谈的事翻出来催。
+HIST_TIME_NOTE = (
+    "\n【关于时间标签】下面你俩的对话，每条开头的方括号是那条话的发送时间"
+    "（月-日 时:分），只是让你知道「这是几点说的」，不是正文的一部分 —— "
+    "你回话时不要写方括号，也不要模仿这个格式。\n"
+    "时间隔得久（几小时前、或者已经是前一天）就说明那是过去说的话："
+    "别当成此刻正在谈的事，别拿它当还没到期的安排，更别把已经过去的日子"
+    "当成还要发生的事。要确认「现在」是几点，以最上面那句当前时间为准。"
+)
+
 # 主动搭话的规则 —— 跟被动回答不一样，重点是"别烦人"
 PROACTIVE_RULES = (
     "这是你主动开口说话，他没有问你。要求：\n"
@@ -191,6 +205,17 @@ class Brain:
                 txt += f"你们上次说话大概在 {int(gap)} 分钟前，他刚回来。"
         return txt
 
+    @staticmethod
+    def _stamp():
+        """给进上下文的历史消息打时间标签，形如 `[09-29 06:18] `。
+
+        不打标签时模型分不清"刚说的"和"六小时前说的" —— 实测她会在上午
+        把凌晨那句"约定的那个周末"当成此刻正在谈的事反复提，因为上下文里
+        一排消息全是"约定的那个周末"，没有任何一个标记告诉它那是几小时前的。
+        标签的读法在 HIST_TIME_NOTE 里向她说明（避免她把格式也模仿了）。
+        """
+        return datetime.datetime.now().strftime("[%m-%d %H:%M] ")
+
     # 只有他提到这些词，才把日记正文带进上下文（2026-09-29 用户拍板）。
     #
     # 以前是**每轮无条件带**，跟他说什么毫无关系，三个坏处：
@@ -298,6 +323,11 @@ class Brain:
             parts.append("\n" + tm)
         if memory_block:
             parts.append("\n" + memory_block)
+        # 历史消息打了时间标签时才说明读法（没打就不花这份 token）。
+        # 见 _stamp / seed_history —— 不说明她会把方括号当正文模仿。
+        if any(str(m.get("content") or "").startswith("[")
+               for m in self.hist[1:] if m.get("role") != "system"):
+            parts.append("\n" + HIST_TIME_NOTE)
         try:
             import recap_store
             rb = recap_store.block()
@@ -478,11 +508,14 @@ class Brain:
                 break
             _clean = "\n".join(_ls).strip()
             if _clean and _clean != "无" and not _failed:
-                self.hist.append({"role": "assistant", "content": _clean})
+                self.hist.append({"role": "assistant",
+                                  "content": self._stamp() + _clean})
         else:
             if not _failed:
-                self.hist.append({"role": "user", "content": user_text})
-                self.hist.append({"role": "assistant", "content": ans})
+                self.hist.append({"role": "user",
+                                  "content": self._stamp() + user_text})
+                self.hist.append({"role": "assistant",
+                                  "content": self._stamp() + ans})
         if len(self.hist) > self.history_turns + 1:
             self.hist = [self.hist[0]] + self.hist[-self.history_turns:]
         self.last_active = datetime.datetime.now()   # 记时间，供"离开时长"用
@@ -544,11 +577,21 @@ class Brain:
         只灌最近几轮（默认 16 条消息 ≈ 8 个来回）。灌太多会让每轮 prompt
         变长、白烧 token，而且模型对太早的上下文本来也记不牢。
         返回灌进去的条数。
+
+        2026-09-29：改成用存档里的真实时间打标签 `[09-29 06:18]`。
+        存档本来就写了 t（`_log_turn` / `_cloud_append_assistant` 都写），
+        以前灌回来时把 t 扔掉了 —— 于是一排"约定的那个周末"没有任何时间标记，
+        模型只能当成此刻正在谈的事（这是她"把 4 天前的 25 号当未来"的直接原因）。
         """
         msgs = self.read_history(limit)
         for m in msgs:
             role = "user" if m.get("role") == "user" else "assistant"
-            self.hist.append({"role": role, "content": m.get("text", "")})
+            text = str(m.get("text") or "")
+            t = str(m.get("t") or "").strip()
+            if len(t) >= 16:
+                # "2026-09-29 06:18" → "[09-29 06:18] "（年份省掉，省点 token）
+                text = "[" + t[5:16] + "] " + text
+            self.hist.append({"role": role, "content": text})
         if len(self.hist) > self.history_turns + 1:
             self.hist = [self.hist[0]] + self.hist[-self.history_turns:]
         return len(msgs)
@@ -645,7 +688,8 @@ class Brain:
                     return "", "无话可说"
                 if ans:
                     self.last_mode = "主动搭话"
-                    self.hist.append({"role": "assistant", "content": ans})
+                    self.hist.append({"role": "assistant",
+                                      "content": self._stamp() + ans})
                     if len(self.hist) > self.history_turns + 1:
                         self.hist = [self.hist[0]] + self.hist[-self.history_turns:]
                     self.last_active = datetime.datetime.now()

@@ -403,6 +403,13 @@ function fmtT(t) {
   if (sameDay) return hm;
   return (d.getMonth() + 1) + '-' + d.getDate() + ' ' + hm;
 }
+// 本机当前时刻，格式跟服务端 /api/chat 返回的 t 一致（"YYYY-MM-DD HH:MM"）。
+// 自己发的消息用它打时间 —— /api/chat 只返回她回复的时刻。
+function nowStr() {
+  const n = new Date(), p = x => ('0' + x).slice(-2);
+  return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate())
+    + ' ' + p(n.getHours()) + ':' + p(n.getMinutes());
+}
 function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 // 历史里他的消息会被服务端塞进一些"给她的提示"：视觉描述、（发一张图给她看）等。
 // 这些是他让她"看到/知道"的内部标记，不该出现在他自己的气泡里 —— 一律剥掉，留他自己打的字。
@@ -545,14 +552,22 @@ function renderAv(role, el) {
   } else { const im = new Image(); im.src = herAv(); el.appendChild(im); }
 }
 function addMsg(role, text, t, myImgB64, imgIsB64) {
-  if (t) lastT = t;
   const d = t || '';
-  const day = d.slice(0, 10);
-  if (day && day !== lastDay) {
-    lastDay = day;
-    const el = document.createElement('div');
-    el.className = 'time'; el.textContent = d.slice(5, 16);
-    $('list').appendChild(el);
+  if (d) {
+    // 时间线：跨天、或者距上一条超过 5 分钟，就插一条时间分隔（像微信）。
+    // 以前只按天插，同一小时里连聊几十条，界面上一条时间都看不到。
+    const day = d.slice(0, 10);
+    const cur = new Date(String(d).replace(' ', 'T'));
+    const prev = lastT ? new Date(String(lastT).replace(' ', 'T')) : null;
+    const gap = (prev && !isNaN(cur) && !isNaN(prev))
+      ? (cur - prev) / 60000 : Infinity;
+    if (day !== lastDay || gap > 5) {
+      lastDay = day;
+      const el = document.createElement('div');
+      el.className = 'time'; el.textContent = fmtT(d);
+      $('list').appendChild(el);
+    }
+    lastT = d;
   }
   const row = document.createElement('div');
   row.className = 'mrow ' + (role === 'user' ? 'me' : 'her');
@@ -623,7 +638,7 @@ function copyText(s) {
 }
 let histSig = '';
 function renderHistory(items) {
-  lastDay = ''; $('list').innerHTML = '';
+  lastDay = ''; lastT = ''; $('list').innerHTML = '';
   items.forEach(it => addMsg(it.role === 'user' ? 'user' : 'assistant', it.text, it.t, it.role === 'user' ? (it.img || '') : '', false));
 }
 function markSeen(items) {
@@ -634,7 +649,7 @@ function markSeen(items) {
 }
 async function loadHistory(manual) {
   try {
-    const r = await fetch(api('/api/history?limit=60'));
+    const r = await fetch(api('/api/history?limit=300'));
     const d = await r.json();
     const items = d.items || [];
     const sig = JSON.stringify(items);
@@ -656,7 +671,7 @@ async function sendText(t, img) {
       body: JSON.stringify({ text: t, img: img || null })
     });
     const d = await r.json();
-    addMsg('assistant', d.reply || (d.err ? '（出错了：' + d.err + '）' : '…'), '');
+    addMsg('assistant', d.reply || (d.err ? '（出错了：' + d.err + '）' : '…'), d.t || '');
   } catch (e) {
     addMsg('assistant', '', '');
     tip('连不上她：去 我-设置-测试连接 看具体原因', 4000);
@@ -668,7 +683,7 @@ async function sendMsg() {
   if (!t && !pendingImg) return;
   const img = pendingImg; cancelImg();
   $('input').value = '';
-  addMsg('user', t, '', img, true);
+  addMsg('user', t, nowStr(), img, true);
   sendText(t, img);
 }
 $('sendBtn').onclick = sendMsg;
@@ -764,7 +779,7 @@ function sendSticker(b64) {
   // 加一道确认，成本极低，能拦住绝大多数误触。
   if (!confirm('把这张表情包发给她？')) return;
   $('stkPanel').style.display = 'none';
-  addMsg('user', '', '', b64, true);
+  addMsg('user', '', nowStr(), b64, true);
   sendText('', b64);
 }
 

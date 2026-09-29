@@ -648,7 +648,7 @@ def _cloud_diary_list():
         return []
 
 
-PROACTIVE_RULES = """现在是一个随机时刻。请决定：要不要主动找他聊两句？
+PROACTIVE_RULES = """先看清楚现在几点、再看看要不要主动找他聊两句。
 
 判断依据：
 - 真遇到想分享的事、突然想起他、或者单纯想他了，才主动
@@ -656,6 +656,9 @@ PROACTIVE_RULES = """现在是一个随机时刻。请决定：要不要主动�
 - 先看一眼你们最近的对话：同一件事你已经问过、催过或说过的，绝不再提第二遍。
   哪怕他一直没回也先放着——真人不会追着人重复问同一句，想聊就换个别的话题，
   或者干脆这轮"无"
+- 看一眼对话里每条前面的方括号时间：要是那句"约定的那个周末"是今早甚至更早
+  说的，那都是过去说过的话，不是此刻正在谈的事 —— 别再翻出来催，也别把
+  已经过去的日子当成还没到（今天几号，看最上面那句当前时间）。
 - 你们之间已经定好的安排（比如假期谁去找谁、票和酒店谁负责），就按定好的说；
   记忆里写的是"已定"就别再当"没准话"来催，拿不准方向就干脆不提这件事，
   绝不能自己换个方向重问、更不能编没人说过的细节（比如"谁说票价要涨"）
@@ -666,6 +669,97 @@ PROACTIVE_RULES = """现在是一个随机时刻。请决定：要不要主动�
         第二行开始就是你发给他的话（一两句，口语，别写作文）
 
 除这两种内容外，不要输出任何别的话。"""
+
+
+# ---------- 主动搭话：配置 / 静默时段 / 每日限额 ----------
+# 2026-09-29：以前 _proactive_loop 里是写死的 time.sleep(2400)，config.json 的
+# proactive 段（enabled / max_per_day / interval_sec / quiet_start / quiet_end）
+# **一个都没读** —— 用户明明设了静默时段，照样凌晨 4 点起被连发消息（实测
+# 04:17~10:58 每 40 分钟一条，共 8 条）。下面这几个函数就是把它接上。
+
+def _proactive_conf():
+    """读 config.json 里的 proactive 段。读不到就返回空 dict（走代码默认值）。"""
+    try:
+        from paths import CONFIG_DIR
+        p = os.path.join(str(CONFIG_DIR), "config.json")
+    except Exception:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "config", "config.json")
+    try:
+        cfg = json.load(open(p, encoding="utf-8"))
+    except Exception:
+        return {}
+    pa = cfg.get("proactive")
+    return pa if isinstance(pa, dict) else {}
+
+
+def _parse_hhmm(s):
+    """'23:00' / '7:30' / '24:00' → 当天第几分钟；不合法返回 None。
+
+    24:00 合法（=1440，用来收一天的尾巴）；24:01 这类不合法 ——
+    用户原来填的 quiet_start=24:00 / quiet_end=24:01 就是后者，
+    解析不出来等于没设静默（这正是旧代码"照发不误"的另一个放行口）。
+    """
+    m = re.match(r"^(\d{1,2}):(\d{2})$", str(s or "").strip())
+    if not m:
+        return None
+    h, mi = int(m.group(1)), int(m.group(2))
+    if h > 24 or mi > 59 or (h == 24 and mi != 0):
+        return None
+    return h * 60 + mi
+
+
+def _in_quiet(start, end, cur=None):
+    """现在是否处于静默时段（这期间不主动搭话）。支持跨零点，如 23:00~07:00。
+
+    cur 传"当天第几分钟"可脱离真实时间测试（不传就取当前时刻）。
+    起止任一解析不出来、或两者相等，一律当"没设静默"（返回 False）——
+    与其猜错把她整天闷住，不如照常说话，用户改配置即可。
+    """
+    a, c = _parse_hhmm(start), _parse_hhmm(end)
+    if a is None or c is None or a == c:
+        return False
+    if cur is None:
+        lt = time.localtime()
+        cur = lt.tm_hour * 60 + lt.tm_min
+    if a < c:
+        return a <= cur < c          # 同日区间，如 13:00~14:00
+    return cur >= a or cur < c       # 跨零点区间，如 23:00~07:00
+
+
+def _proactive_quota_file():
+    try:
+        from paths import DATA_DIR
+        return os.path.join(str(DATA_DIR), "proactive_quota.json")
+    except Exception:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "proactive_quota.json")
+
+
+def _proactive_used_today():
+    """今天已经主动搭话几次（跨天自动归零）。"""
+    try:
+        d = json.load(open(_proactive_quota_file(), encoding="utf-8"))
+    except Exception:
+        return 0
+    if str(d.get("date") or "") != time.strftime("%Y-%m-%d"):
+        return 0
+    try:
+        return int(d.get("n") or 0)
+    except Exception:
+        return 0
+
+
+def _proactive_count_up():
+    """主动搭话计数 +1 并落盘（重启不丢）。写不进去也不能影响聊天。"""
+    try:
+        p = _proactive_quota_file()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"date": time.strftime("%Y-%m-%d"),
+                       "n": _proactive_used_today() + 1}, f)
+    except Exception:
+        pass
 
 
 def _cloud_append_assistant(text):
@@ -993,7 +1087,11 @@ def start_remote_api(brain):
                             errlog.warn("api/chat", f"{mode}：{err}")
                         except Exception:
                             pass
-                    self._json(200, {"reply": ans, "mode": mode, "err": err})
+                    # 带上这条回复的时刻：手机 App 靠它显示每条消息的时间。
+                    # 以前不返回，前端 addMsg 只能传空串 —— 结果"刚聊完的消息
+                    # 一条时间都没有"，只有重进页面走 /api/history 才带 t。
+                    self._json(200, {"reply": ans, "mode": mode, "err": err,
+                                     "t": time.strftime("%Y-%m-%d %H:%M")})
                 elif path == "/api/proactive":
                     with _LOCAL["lock"]:
                         ans, mode = brain.speak_on_scene(
@@ -1545,10 +1643,29 @@ def run_server():
         # 主动搭话：同样由她决定说不说；说了就写进聊天存档，
         # 手机 App 的后台轮询会拉到这条消息并弹通知
         def _proactive_loop(b):
-            import re as _re
             while True:
                 try:
-                    time.sleep(2400)
+                    # 每轮重新读配置：改完 config.json 不用重启大脑就生效
+                    pa = _proactive_conf()
+                    interval = int(pa.get("interval_sec") or 2400)
+                    time.sleep(max(300, interval))
+                    if not pa.get("enabled", True):
+                        continue
+                    # 静默时段：默认 23:00~07:00。
+                    # 旧代码 24 小时不停，凌晨那 8 条就是这么来的。
+                    qs = pa.get("quiet_start", "23:00")
+                    qe = pa.get("quiet_end", "07:00")
+                    if _in_quiet(qs, qe):
+                        print("[大脑] 静默时段（%s~%s），这轮不主动搭话"
+                              % (qs, qe), flush=True)
+                        continue
+                    # 每日上限：她一天主动几十条比不说话更烦人
+                    cap = int(pa.get("max_per_day") or 99)
+                    used = _proactive_used_today()
+                    if used >= cap:
+                        print("[大脑] 今天主动搭话已到上限（%d/%d）"
+                              % (used, cap), flush=True)
+                        continue
                     with _LOCAL["lock"]:
                         ans, _mode = b.chat(PROACTIVE_RULES, proactive=True,
                                             log=False)
@@ -1562,7 +1679,9 @@ def run_server():
                     if not text:
                         continue
                     _cloud_append_assistant(text)
-                    print("[大脑] 她主动找他说话了", flush=True)
+                    _proactive_count_up()
+                    print("[大脑] 她主动找他说话了（今天第 %d 次）"
+                          % (used + 1), flush=True)
                 except Exception as e:
                     print(f"[大脑] 主动搭话循环出错：{str(e)[:80]}", flush=True)
         threading.Thread(target=_proactive_loop,

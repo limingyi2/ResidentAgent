@@ -33,11 +33,12 @@
   },
 
   "proactive": {
+    "_说明": "主动搭话。quiet_start~quiet_end 之间她不会主动开口（支持跨零点，如 23:00~07:00）；max_per_day 是每天最多主动几条；interval_sec 是检查间隔。留空或写错格式＝不静默。",
     "enabled": true,
-    "max_per_day": 99,
-    "interval_sec": 2400,
-    "quiet_start": "24:00",
-    "quiet_end": "24:01",
+    "max_per_day": 6,
+    "interval_sec": 3600,
+    "quiet_start": "23:00",
+    "quiet_end": "07:00",
     "on_activity_change": true,
     "on_game_start": true,
     "on_startup": true
