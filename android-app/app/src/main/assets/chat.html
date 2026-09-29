@@ -384,7 +384,7 @@ body.notab .page { bottom:0; }
 /* ================= 基础 ================= */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 13;   // 13 = 模型设置页 + 错误日志页（2026-09-29）
+const APP_CODE  = 14;   // 14 = 每条消息显示时刻（间隔>5分钟插时间线）+ 历史放宽到 300 条（2026-09-29）
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
