@@ -438,15 +438,70 @@ class LifeEngine:
         if br:
             bits.append(f"- 你现在在{br.get('name', '假期')}里"
                         f"（{br.get('start')}~{br.get('end')}），学校不上课，一天都是你自己的")
+        elif not self._calendar_known(date_str or datetime.date.today().isoformat()):
+            # 校历没维护到这天：让她含糊其辞，而不是编个笃定的答案
+            bits.append("- 这天的放假安排还没出通知，你自己也不确定，"
+                        "别把有没有课、放不放假说死，要用「应该 / 大概 / 还不确定」的口气")
         return "\n".join(bits)
 
     # ---------- 校历：放假没课，调休日按指定星期补课 ----------
     def _calendar(self):
         return self.world.get("calendar") or {}
 
-    def _break_of(self, date_str):
-        """这天落在哪个假期区间里（不在假期返回 None）。数据在 world.json 的 calendar.breaks。
+    def _semesters(self):
+        """学期列表（按开始日排序，去掉缺起止的脏数据）。寒暑假就从这里推导。"""
+        sems = [s for s in self._calendar().get("semesters") or []
+                if s.get("start") and s.get("end")]
+        return sorted(sems, key=lambda s: s["start"])
 
+    def _semester_gap_of(self, date_str):
+        """这天落在两个学期之间吗（寒暑假）。返回假 None / {"name","start","end","derived"}。
+
+        寒暑假走推导而不是写死：学期起止一年只动一次，而寒暑假的起止年年不同，
+        手填容易忘改。        法定节假日不能这么算 —— 调休是国务院每年拍板公布的，
+        没有规律（2026 年清明端午中秋都不调，春节却拼出 9 天），只能留在 breaks 逐年填。
+        """
+        sems = self._semesters()
+        for a, b in zip(sems, sems[1:]):
+            try:
+                gs = datetime.date.fromisoformat(a["end"]) + datetime.timedelta(days=1)
+                ge = datetime.date.fromisoformat(b["start"]) - datetime.timedelta(days=1)
+            except Exception:
+                continue
+            if gs <= ge and gs.isoformat() <= date_str <= ge.isoformat():
+                return {"name": "寒假" if gs.month in (12, 1, 2) else "暑假",
+                        "start": gs.isoformat(), "end": ge.isoformat(),
+                        "derived": True}
+        # 学期列表的"尾巴"后面没有下一个学期来框住暑假，按高校惯例推到 8/31：
+        # 新学期基本都在 9 月初开课。往 semesters 补了下一条学期后，这条就不生效了
+        if sems:
+            try:
+                gs = datetime.date.fromisoformat(sems[-1]["end"]) + datetime.timedelta(days=1)
+            except Exception:
+                return None
+            ge = datetime.date(gs.year, 8, 31)
+            if gs.month in (5, 6, 7) and gs <= ge and gs.isoformat() <= date_str <= ge.isoformat():
+                return {"name": "暑假", "start": gs.isoformat(), "end": ge.isoformat(),
+                        "derived": True}
+        return None
+
+    def _calendar_known(self, date_str):
+        """校历对这天有没有结论（在学期里 / 放假 / 调休）。
+
+        没结论 = 校历还没维护到这个日期。宁可让她说「通知还没出」，
+        也别让她把编出来的课表说得跟真的一样 —— 那才是穿帮。
+        """
+        if self._break_of(date_str) or self._makeup_of(date_str):
+            return True
+        for s in self._semesters():
+            if s["start"] <= date_str <= s["end"]:
+                return True
+        return False
+
+    def _break_of(self, date_str):
+        """这天落在哪个假期区间里（不在假期返回 None）。
+
+        顺序：breaks 里的法定假日优先（精确数据），再推导学期间隙（寒暑假）。
         项目原本**只有"星期几"这一维、没有"日期"**，10/1 是周四就直接套周四课表，
         于是她在国庆当天上课、交报告、被老师扣分。
         """
@@ -454,7 +509,7 @@ class LifeEngine:
             s, e = b.get("start"), b.get("end")
             if s and e and s <= date_str <= e:
                 return b
-        return None
+        return self._semester_gap_of(date_str)
 
     def _makeup_of(self, date_str):
         """这天是不是调休补课日（不是返回 None）。"""
@@ -475,13 +530,17 @@ class LifeEngine:
         return "；".join(out)
 
     def _classes_of(self, date_str):
-        """某天的课表（硬约束）。假期一律没课；调休补课日按 as_weekday 补。"""
+        """某天的课表（硬约束）。假期一律没课；调休补课日按 as_weekday 补；
+        校历没覆盖到的日子也返回空 —— 课表是硬约束，编出来的课就是穿帮。
+        """
         if self._break_of(date_str):
             return ""
         mk = self._makeup_of(date_str)
         if mk:
             wd = str(mk.get("as_weekday") or "")
             return self._classes_on(wd) if wd.isdigit() else ""
+        if not self._calendar_known(date_str):
+            return ""
         try:
             return self._classes_on(datetime.date.fromisoformat(date_str).isoweekday())
         except Exception:
@@ -633,9 +692,14 @@ class LifeEngine:
             "事情堆一起那种烦和累。别每个时段都平铺直叙地说“做了什么”",
         ]
         if br:
-            p.append(f"- 你这几天在{br.get('name', '假期')}，别写上课、老师、实验室、作业、"
-                     "交报告 —— 你在放假。写假期里真会做的事（出门玩、回家、逛街、睡到中午、"
-                     "跟朋友瞎逛），作息乱一点也没关系")
+            # derived = 寒暑假，是按学期排推导出来的，提示里也交代一句，免得她自己都心虚
+            tag = "（按学期排的）" if br.get("derived") else ""
+            p.append(f"- 你在{br.get('name', '假期')}里{tag}，别写上课、老师、实验室、"
+                     "作业、交报告 —— 学校根本没人")
+            # 光说"别写上课"她容易写干巴巴的"在家休息"；把放假该干的事摆出来才像人话
+            p.append("- 写放假真会做的事：追剧、打游戏、回家、逛街、跟朋友瞎逛、睡到中午；"
+                     "寒假可以惦记过年、收红包、被亲戚问成绩，暑假可以嫌热，"
+                     "临开学可以不想开学 —— 作息乱一点也没关系")
         p.append("- 严格照下面这个格式输出，一行一个，只写这些时段，别多写别少写：")
         for n in names:
             p.append(f"[{n}] 这个时段发生了什么")
