@@ -95,6 +95,14 @@ LIFE_RULES = (
 )
 
 
+# 开头的时间标签。上下文里每条历史都带（见 Brain._stamp），模型会照抄这个格式，
+# 所以必须在出口剥掉。日期段允许 1~2 组 —— `_stamp()` 产出的是两组的
+# `[MM-DD HH:MM]`，而这里早期只覆盖了三组的 `[YYYY-MM-DD HH:MM]`，
+# 两组的就一直漏网、直接显示在屏幕上（2026-10-01 用户两次截图反馈）。
+# 两个出口共用这个常量，免得再改一处漏一处。
+_TIME_TAG_RE = re.compile(r"^\[\d{1,4}(?:-\d{1,2}){1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*")
+
+
 def _clean(s, keep_newlines=False):
     """收拾模型输出：去思考块、去前缀、压空白。
 
@@ -118,7 +126,7 @@ def _clean(s, keep_newlines=False):
     if keep_newlines:
         out = []
         for ln in s.split("\n"):
-            ln = re.sub(r"^\[\d{1,4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*", "", ln)
+            ln = _TIME_TAG_RE.sub("", ln)
             ln = re.sub(r"^(角色|角色|角色|角色)\s*[:：]\s*", "", ln)
             ln = re.sub(r"^[\"“”「」『』\s]+", "", ln)
             ln = re.sub(r"[\"“”「」『』\s]+$", "", ln)
@@ -127,7 +135,7 @@ def _clean(s, keep_newlines=False):
                 out.append(ln)
         return "\n".join(out)
 
-    s = re.sub(r"^\[\d{1,4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*", "", s)
+    s = _TIME_TAG_RE.sub("", s)
     s = re.sub(r"^(角色|角色|角色|角色)\s*[:：]\s*", "", s)
     # 引号首尾都要去：只去开头的话，"“你好”" 会剩个尾巴
     s = re.sub(r"^[\"“”「」『』\s]+", "", s)

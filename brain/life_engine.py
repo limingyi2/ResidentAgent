@@ -393,7 +393,9 @@ class LifeEngine:
         return w
 
     def save_world(self, world):
-        json.dump(world, open(self.world_path, "w", encoding="utf-8"),
+        # newline="\n" 不能省：不给的话 Windows 文本模式会把换行写成 CRLF，
+        # 云端那份就跟仓库那份天天"字节不一致、内容一模一样"，比对时非常误导
+        json.dump(world, open(self.world_path, "w", encoding="utf-8", newline="\n"),
                   ensure_ascii=False, indent=2)
         self.world = world
 
@@ -402,7 +404,13 @@ class LifeEngine:
         w = self.world
         return bool(w.get("school") and w.get("major"))
 
-    def _world_block(self):
+    def _world_block(self, date_str=None):
+        """她的基本情况。date_str 给了就顺带说明"这天在不在假期里"。
+
+        为什么假期必须放这个块里：它是聊天、写日记、生成生活片段**都会看到**的
+        唯一一块，放这儿等于一次覆盖所有出口。否则就会出现"校园空了她还在上课"
+        那种自相矛盾 —— 课表是硬约束塞进去的，模型不敢违背，只好两边都写。
+        """
         w = self.world
         bits = []
         where = "".join(x for x in [w.get("city", ""), w.get("school", "")] if x)
@@ -426,14 +434,37 @@ class LifeEngine:
                 bits.append(f"- 社团：{c}")
         if w.get("notes"):
             bits.append("- " + str(w["notes"]))
+        br = self._break_of(date_str or datetime.date.today().isoformat())
+        if br:
+            bits.append(f"- 你现在在{br.get('name', '假期')}里"
+                        f"（{br.get('start')}~{br.get('end')}），学校不上课，一天都是你自己的")
         return "\n".join(bits)
 
-    def _classes_of(self, date_str):
-        """某天的课表（硬约束）"""
-        try:
-            wd = datetime.date.fromisoformat(date_str).isoweekday()
-        except Exception:
-            return ""
+    # ---------- 校历：放假没课，调休日按指定星期补课 ----------
+    def _calendar(self):
+        return self.world.get("calendar") or {}
+
+    def _break_of(self, date_str):
+        """这天落在哪个假期区间里（不在假期返回 None）。数据在 world.json 的 calendar.breaks。
+
+        项目原本**只有"星期几"这一维、没有"日期"**，10/1 是周四就直接套周四课表，
+        于是她在国庆当天上课、交报告、被老师扣分。
+        """
+        for b in self._calendar().get("breaks") or []:
+            s, e = b.get("start"), b.get("end")
+            if s and e and s <= date_str <= e:
+                return b
+        return None
+
+    def _makeup_of(self, date_str):
+        """这天是不是调休补课日（不是返回 None）。"""
+        for m in self._calendar().get("makeup") or []:
+            if m.get("date") == date_str:
+                return m
+        return None
+
+    def _classes_on(self, wd):
+        """按星期几取课表，wd 是 1~7。"""
         rows = (self.world.get("schedule") or {}).get(str(wd)) or []
         out = []
         for r in rows:
@@ -442,6 +473,19 @@ class LifeEngine:
             else:
                 out.append(str(r))
         return "；".join(out)
+
+    def _classes_of(self, date_str):
+        """某天的课表（硬约束）。假期一律没课；调休补课日按 as_weekday 补。"""
+        if self._break_of(date_str):
+            return ""
+        mk = self._makeup_of(date_str)
+        if mk:
+            wd = str(mk.get("as_weekday") or "")
+            return self._classes_on(wd) if wd.isdigit() else ""
+        try:
+            return self._classes_on(datetime.date.fromisoformat(date_str).isoweekday())
+        except Exception:
+            return ""
 
     # ---------- 状态 / 事件 ----------
     @property
@@ -564,12 +608,13 @@ class LifeEngine:
             f"日期是 {date_str}（{wd}）。{self._voice()}。",
             "",
             "关于你的设定（这些是固定的，别改也别编新的）：",
-            self._world_block() or "- 你是个大三学生",
+            self._world_block(date_str) or "- 你是个大三学生",
             f"- 这一天的基调：{tone}（照这个来，写的事要能让人感觉到）",
         ]
         cls = self._classes_of(date_str)
         if cls:
             p.append(f"- 这天你的课：{cls}")
+        br = self._break_of(date_str)
         recent = [e for e in done_events if e.get("date") == date_str]
         if recent:
             p.append("")
@@ -586,8 +631,12 @@ class LifeEngine:
             "- 你是个普通的大三女生，不是每天都在过顺顺当当的日子。上面那条基调要真的透出来："
             "可以是被谁逗笑、吃到想吃的东西那种开心，也可以是答不上问题、被吵得没睡好、"
             "事情堆一起那种烦和累。别每个时段都平铺直叙地说“做了什么”",
-            "- 严格照下面这个格式输出，一行一个，只写这些时段，别多写别少写：",
         ]
+        if br:
+            p.append(f"- 你这几天在{br.get('name', '假期')}，别写上课、老师、实验室、作业、"
+                     "交报告 —— 你在放假。写假期里真会做的事（出门玩、回家、逛街、睡到中午、"
+                     "跟朋友瞎逛），作息乱一点也没关系")
+        p.append("- 严格照下面这个格式输出，一行一个，只写这些时段，别多写别少写：")
         for n in names:
             p.append(f"[{n}] 这个时段发生了什么")
         p.append("心情: 一句话说说你这一天心里的感觉（20 字以内，"
@@ -691,7 +740,7 @@ class LifeEngine:
             f"你是{self.name}。{self._voice()}。",
             "",
             "关于你的设定（固定，别改）：",
-            self._world_block() or "- 你是个大三学生",
+            self._world_block(date_str) or "- 你是个大三学生",
             "",
             f"现在是 {date_str}（{wd}）晚上，你要写今天的日记。",
         ]
