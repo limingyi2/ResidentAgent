@@ -19,7 +19,6 @@ import time
 import urllib.request
 
 try:
-    import paths
     from paths import CONFIG_PATH, DATA_DIR
 except Exception:                      # 单独跑这个文件时的兜底
     CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),

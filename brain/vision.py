@@ -11,8 +11,6 @@ NVIDIA 卡准备的，这台是 AMD，跑不了。现在把图发到云端、拿
 成本：一张图大约 100~1500 token（取决于尺寸）。发之前会把长边压到 max_side，
 手机随手拍的照片基本落在几分钱一张。模型在 config.json 的 vision 段可换。
 """
-import os
-import io
 import json
 import base64
 import urllib.request

@@ -15,7 +15,7 @@ BAAI/bge-m3 与 BAAI/bge-large-zh-v1.5，均为 1024 维。换模型会让旧向
 - retrieve(query, top_k)：按语义相似度只注入最相关的记忆
 - 提取：优先 API（OpenAI 兼容），失败 / 无 key 自动降级规则提取
 """
-import json, os, re, time, sys
+import json, os, re, time
 import numpy as np
 import httpx
 
@@ -445,7 +445,7 @@ class MemoryStore:
             return out
         m = re.search(r"(?:养了|有|养)(?:一?只|条|个)?(猫|狗|仓鼠|兔子|乌龟|鸟|鱼|小动物)(?:子)?(?:名字叫|叫|起名|取名叫)?([\u4e00-\u9fa5A-Za-z0-9]{1,4})", t)
         if m:
-            out.append((f"宠物", f"{m.group(1)}叫{m.group(2)}"))
+            out.append(("宠物", f"{m.group(1)}叫{m.group(2)}"))
         m = re.search(r"(?:我|我特别|我最)(喜欢|爱吃|讨厌|烦|不爱吃)(.+?)(?:。|！|$)", t)
         if m:
             key = "喜欢" if m.group(1) in ("喜欢", "爱吃") else "讨厌"

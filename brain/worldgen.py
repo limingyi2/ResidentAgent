@@ -11,7 +11,6 @@ python worldgen.py --check   只打印一份生成结果，不落盘
 python worldgen.py --seed 7  固定随机种子（调试用，同一种子永远同一份世界）
 """
 import os
-import sys
 import json
 import random
 import shutil

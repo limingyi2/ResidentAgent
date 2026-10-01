@@ -434,6 +434,23 @@ class LifeEngine:
                 bits.append(f"- 社团：{c}")
         if w.get("notes"):
             bits.append("- " + str(w["notes"]))
+        # 天气只读缓存（weather_cache 刷的），取不到就不提 —— 聊天不为它多等一秒
+        try:
+            import weather_cache
+            wx = weather_cache.note()
+            if wx:
+                bits.append(f"- 你那边现在的天气：{wx}")
+        except Exception:
+            pass
+        # 热搜也是缓存喂的。措辞是"她刚刷到"，不是新闻播报 —— 别让她念榜单
+        try:
+            import hotboard_cache
+            hot = hotboard_cache.note()
+            if hot:
+                bits.append("- 你刚才刷手机看到的热搜（你想聊哪个就聊哪个，"
+                            "也可以完全不提，别一条条播报）：" + hot)
+        except Exception:
+            pass
         ds = date_str or datetime.date.today().isoformat()
         br = self._break_of(ds)
         if br:
@@ -675,7 +692,6 @@ class LifeEngine:
 
     # --- 生成一天的片段 ---
     def _day_prompt(self, date_str, slots, done_events):
-        w = self.world
         wd = WEEKDAY[datetime.date.fromisoformat(date_str).weekday()]
         names = [s["slot"] for s in slots]
         is_today = (date_str == datetime.date.today().isoformat())

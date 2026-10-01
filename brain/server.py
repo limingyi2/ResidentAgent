@@ -18,16 +18,9 @@ import sys
 import json
 import time
 import random
-import socket
-import struct
 import base64
-import hashlib
-import asyncio
 import threading
 import http.server
-import urllib.error
-import urllib.parse
-import urllib.request
 
 # 计划任务启动时 stdout 是 GBK：回复里带 emoji，print 就抛 UnicodeEncodeError，
 # 整个流程断在"发送"之前（表现为"生成了回复但对方收不到"）。强制 UTF-8 + replace
@@ -769,14 +762,12 @@ def _proactive_note_user():
     """
     now = int(time.time())
     d = _proactive_stats_load()
-    changed = False
     for s in reversed(d.get("sent") or []):
         if s.get("replied"):
             continue
         if now - int(s.get("ts") or 0) <= 3 * 3600:
             s["replied"] = 1
             s["gap"] = now - int(s.get("ts") or 0)
-            changed = True
         break                      # 只认最近那一条
     d["last_user_ts"] = now
     _proactive_stats_save(d)
@@ -1884,6 +1875,19 @@ def run_server():
                         first = False
                         continue
                     first = False
+                    # 顺路刷天气 + 热搜缓存（失败静默，聊天链路只读缓存文件）
+                    try:
+                        tok = (API_CFG.get("uapi") or {}).get("token")
+                        city = (_LOCAL["brain"].life.world.get("city")
+                                if getattr(_LOCAL.get("brain"), "life", None) else "")
+                        if tok:
+                            import weather_cache, hotboard_cache
+                            if city:
+                                weather_cache.refresh(city, tok)
+                            plat = (API_CFG.get("uapi") or {}).get("hotboard_type") or "weibo"
+                            hotboard_cache.refresh(plat, tok)
+                    except Exception:
+                        pass
                     if moments.today_count() >= 4:
                         continue        # 一天最多四条（自拍/吃的/风景/猫狗/八卦都能发，活跃一天很正常）
                     raw, posted = try_post_moment(b)
