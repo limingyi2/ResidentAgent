@@ -113,14 +113,14 @@ VOICE_CATALOG = [
      "voice": "qwen-audio-3.1-tts-flash-gsganyu-7ef9ebe5858c4668bc01434ca2293754",
      "desc": "温柔偏低，长句子最稳"},
 
-    {"key": "moning_01", "label": "莫宁 · 你录的", "group": "你自己录的",
+    {"key": "moning_01", "label": "莫宁", "group": "你自己录的",
      "provider": "aliyun", "model": ALI_MODEL, "name": "moning",
      "voice": "qwen-audio-3.1-tts-flash-moning-b17d12e4e1544238933058b067824d95",
-     "desc": "自录，人味最足；2026-10-01 重录版（48kHz，电平比初版好）"},
-    {"key": "jiabeilina_v2", "label": "嘉贝莉娜 · 你录的", "group": "你自己录的",
+     "desc": "人味最足，长句子也稳；2026-10-01 重录版（电平比初版好）"},
+    {"key": "jiabeilina_v2", "label": "嘉贝莉娜", "group": "你自己录的",
      "provider": "aliyun", "model": ALI_MODEL, "name": "jblina",
      "voice": "qwen-audio-3.1-tts-flash-jblina-24bdbe99164b459f99d3b2da87157214",
-     "desc": "自录，音色偏暗偏低，反差感强"},
+     "desc": "音色偏暗偏低，反差感强"},
 ]
 
 

@@ -271,6 +271,11 @@ body.notab .page { bottom:0; }
       <div class="hint">换性格不用重启，点一下就生效；长相永远是同一个人。</div>
     </div>
     <div class="grp">
+      <div class="setrow"><div class="lab">她的声音</div><input id="voiceCur" readonly placeholder="加载中…"></div>
+      <div id="voiceList"></div>
+      <div class="hint">点「试听」先听，觉得可以再点整行换掉。只影响她发的语音条，文字、性格、记忆都不动。</div>
+    </div>
+    <div class="grp">
       <div class="setrow" onclick="pick('herav')"><div class="lab">她的头像</div>
         <input id="herAvIn" readonly placeholder="点击换图（相册选）"><div class="cav" style="width:32px;height:32px" id="setHerAv"></div></div>
       <div class="setrow" onclick="pick('bg')"><div class="lab">聊天背景</div><input readonly placeholder="相册选图"><span class="arrow">›</span></div>
@@ -389,7 +394,7 @@ body.notab .page { bottom:0; }
 /* ================= 基础 ================= */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 16;   // 16 = 她会发语音条（CosyVoice2-0.5B）+ 设置页显示今日用量/token（2026-10-01）
+const APP_CODE  = 18;   // 18 = 语音条不再重复显示文字（2026-10-01）；17 = 设置页一键换声音；16 = 语音条 + 今日用量
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
@@ -486,7 +491,7 @@ function openPage(p) {
   if (p === 'chat') loadHistory(true);
   if (p === 'moments') loadMoments();
   if (p === 'diary') loadDiaryList();
-  if (p === 'settings') { loadPersonas(); loadStats(); }
+  if (p === 'settings') { loadPersonas(); loadVoices(); loadStats(); }
   if (p === 'discover') switchTab('discover');
 }
 function switchTab(t) {
@@ -597,9 +602,11 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
     if (shown) { const tx = document.createElement('div'); tx.textContent = shown; bub.appendChild(tx); }
   } else if (/\[voice[:：][^\]]+\]/.test(raw)) {
     // 她发的语音条：服务端已经把文字合成为 mp3（voice.py），这里只负责播放。
-    // 语音条后面通常还跟着那条文字（听不清也能看），照原样显示。
+    // 2026-10-01 改（用户要求"消息只要语音"）：**不再把标签后面那条文字显示出来**。
+    // 原来会在播放器下面再铺一遍原文，一条消息看着像"语音 + 重复的文字"两截。
+    // 文字仍然照原样存在历史里（标签后面那段没删），只是不渲染 ——
+    // 万一以后想恢复，把 after 那两行加回来就行。
     const m = raw.match(/\[voice[:：]([^\]]+)\]/);
-    const after = raw.replace(/\[voice[:：][^\]]+\]\s*/, '');
     const au = document.createElement('audio');
     au.controls = true;
     au.preload = 'none';
@@ -608,11 +615,6 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
     au.src = api('/api/voice') + '&name=' + encodeURIComponent(m[1].trim());
     au.onerror = () => { const t = document.createElement('div'); t.textContent = '（这段语音没取到）'; bub.appendChild(t); };
     bub.appendChild(au);
-    if (after) {
-      const tx = document.createElement('div');
-      tx.textContent = after;
-      bub.appendChild(tx);
-    }
   } else if (/\[img[:：][^\]]+\]/.test(raw)) {
     // 正文里夹着 [img:名字]（可能单独一行、也可能前面还有文字）→ 逐段渲染成文字+图
     const re = /\[img[:：]([^\]]+)\]/g;
@@ -1008,6 +1010,80 @@ async function applyPersona(key, label) {
     const r = await fetch(api('/api/persona/apply'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key }) });
     const d = await r.json();
     if (d.ok) { tip('已切换：' + (d.name || label)); loadPersonas(); }
+    else tip(d.err || '切换失败');
+  } catch (e) { tip('切换失败，检查网络'); }
+}
+
+/* ================= 她的声音 ================= */
+// 2026-10-01 加。起因：换一次音色要 ssh 上云改配置再重启，用户问"能不能在 App 里快速换"。
+// 数据来自 /api/voices（清单是云端代码里的死数据，不联网，所以设置页永远打得开）。
+// 「试听」走 /api/voice/preview —— 云端用**临时配置**合成，不会顺手把她换掉。
+let voiceItems = [], vAudio = null;
+async function loadVoices() {
+  const cur = $('voiceCur'), box = $('voiceList');
+  if (!cur || !box) return;
+  cur.value = '加载中…'; box.innerHTML = '';
+  try {
+    const r = await fetch(api('/api/voices'));
+    const d = await r.json();
+    if (!d.ok) { cur.value = '读取失败'; return; }
+    voiceItems = d.items || [];
+    const hit = voiceItems.filter(x => x.key === d.current)[0];
+    cur.value = hit ? hit.label : (d.current || '未设置');
+    let lastGroup = '';
+    voiceItems.forEach(v => {
+      if (v.group && v.group !== lastGroup) {
+        lastGroup = v.group;
+        const g = document.createElement('div');
+        g.className = 'hint';
+        g.style.padding = '10px 0 2px';
+        g.textContent = v.group;
+        box.appendChild(g);
+      }
+      const row = document.createElement('div');
+      row.className = 'setrow';
+      row.style.borderTop = '1px solid #f0f0f0';
+      row.onclick = () => applyVoice(v.key, v.label);
+      const info = document.createElement('div');
+      info.style.flex = '1';
+      info.innerHTML = '<div style="font-size:15px;color:#191919">' + esc(v.label) +
+        (v.key === d.current ? ' <span style="color:#07c160;font-size:12px">· 当前</span>' : '') +
+        '</div><div style="font-size:12px;color:#9c9c9c;margin-top:2px">' + esc(v.desc || '') + '</div>';
+      const btn = document.createElement('button');
+      btn.textContent = '试听';
+      btn.style.cssText = 'flex:0 0 auto;height:30px;padding:0 12px;margin-left:8px;border:1px solid #07c160;border-radius:15px;background:#fff;color:#07c160;font-size:12.5px';
+      btn.onclick = ev => { ev.stopPropagation(); previewVoice(v.key, btn); };
+      row.appendChild(info); row.appendChild(btn);
+      box.appendChild(row);
+    });
+  } catch (e) { cur.value = '加载失败'; }
+}
+async function previewVoice(key, btn) {
+  if (vAudio) { try { vAudio.pause(); } catch (e) {} vAudio = null; }
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '合成中';
+  try {
+    const r = await fetch(api('/api/voice/preview'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: key }) });
+    const d = await r.json();
+    if (!d.ok) { tip(d.err || '合不出声音'); btn.textContent = old; return; }
+    vAudio = new Audio(api('/api/voice') + '&name=' + encodeURIComponent(d.name));
+    vAudio.onended = () => { btn.textContent = old; };
+    await vAudio.play();
+    btn.textContent = '■ 播放中';
+  } catch (e) { tip('试听失败，检查网络'); btn.textContent = old; }
+  btn.disabled = false;
+}
+async function applyVoice(key, label) {
+  if (!confirm('把她的声音换成「' + (label || key) + '」？\n\n只影响她发的语音条，说话方式、长相和聊天记录都不变。')) return;
+  tip('切换中…');
+  try {
+    const r = await fetch(api('/api/voice/apply'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: key }) });
+    const d = await r.json();
+    if (d.ok) { tip('已换成：' + (d.desc || label), 3000); loadVoices(); loadStats(); }
     else tip(d.err || '切换失败');
   } catch (e) { tip('切换失败，检查网络'); }
 }
