@@ -163,6 +163,7 @@ class MemoryStore:
         self._imap = {}       # id -> 行号
         self._dim = 0         # 实际向量维度，由落盘的矩阵决定
         self._index_loaded = False
+        self.last_hits = []          # 上一次 render() 命中的 (相似度, 文本)，见 render
 
     # ---------- 持久化 ----------
     def _load(self):
@@ -391,6 +392,7 @@ class MemoryStore:
         """
         if query:
             hits = self.retrieve(query, top_k=top_k, min_score=min_score)
+            self.last_hits = hits          # 给 trace 落盘用（2026-10-01 加）
             if hits:
                 return "你记得他的事（这些是真的，聊天时自然地用上）：\n" + "；".join(t for _, t in hits)
         items = self.data["items"][-max_items:]

@@ -315,6 +315,11 @@ body.notab .page { bottom:0; }
       <button class="sbtn" onclick="loadModelCfg(true)">重新拉取模型列表</button>
     </div>
     <div class="grp">
+      <div class="setrow"><div class="lab">今日用量</div><div id="statDaily" style="color:#888;font-size:13px">加载中…</div></div>
+      <div class="hint" id="statHint">轮数 / token / 平均延迟。她"突然变傻"多半是这里看出了问题（余额、模型、降级）。</div>
+      <button class="sbtn" onclick="loadStats(true)">刷新用量</button>
+    </div>
+    <div class="grp">
       <button class="sbtn green" onclick="saveModels()">保存并生效</button>
       <div class="hint" id="mResult"></div>
     </div>
@@ -384,7 +389,7 @@ body.notab .page { bottom:0; }
 /* ================= 基础 ================= */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 15;   // 15 = 修"重开 App 不显示最新消息"：历史改成增量渲染 + 吸底改为 ResizeObserver 观察每行 + 程序滚动不再被误判成用户上翻（2026-10-01）
+const APP_CODE  = 16;   // 16 = 她会发语音条（CosyVoice2-0.5B）+ 设置页显示今日用量/token（2026-10-01）
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
@@ -481,7 +486,7 @@ function openPage(p) {
   if (p === 'chat') loadHistory(true);
   if (p === 'moments') loadMoments();
   if (p === 'diary') loadDiaryList();
-  if (p === 'settings') loadPersonas();
+  if (p === 'settings') { loadPersonas(); loadStats(); }
   if (p === 'discover') switchTab('discover');
 }
 function switchTab(t) {
@@ -590,6 +595,24 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
     bub.appendChild(im);
     const shown = cleanMine(raw);
     if (shown) { const tx = document.createElement('div'); tx.textContent = shown; bub.appendChild(tx); }
+  } else if (/\[voice[:：][^\]]+\]/.test(raw)) {
+    // 她发的语音条：服务端已经把文字合成为 mp3（voice.py），这里只负责播放。
+    // 语音条后面通常还跟着那条文字（听不清也能看），照原样显示。
+    const m = raw.match(/\[voice[:：]([^\]]+)\]/);
+    const after = raw.replace(/\[voice[:：][^\]]+\]\s*/, '');
+    const au = document.createElement('audio');
+    au.controls = true;
+    au.preload = 'none';
+    au.style.maxWidth = '210px';
+    au.style.display = 'block';
+    au.src = api('/api/voice') + '&name=' + encodeURIComponent(m[1].trim());
+    au.onerror = () => { const t = document.createElement('div'); t.textContent = '（这段语音没取到）'; bub.appendChild(t); };
+    bub.appendChild(au);
+    if (after) {
+      const tx = document.createElement('div');
+      tx.textContent = after;
+      bub.appendChild(tx);
+    }
   } else if (/\[img[:：][^\]]+\]/.test(raw)) {
     // 正文里夹着 [img:名字]（可能单独一行、也可能前面还有文字）→ 逐段渲染成文字+图
     const re = /\[img[:：]([^\]]+)\]/g;
@@ -939,6 +962,24 @@ async function commentMoment(id, text) {
 
 /* ================= 人设切换 ================= */
 let personaKeys = {};
+async function loadStats(manual) {
+  try {
+    const r = await fetch(api('/api/stats'));
+    const d = await r.json();
+    const el = $('statDaily');
+    if (el) {
+      const fb = d.fallback ? ('　降级 ' + d.fallback + ' 次') : '';
+      el.textContent = d.turns + ' 轮　' + (d.tok_in || 0) + '/' + (d.tok_out || 0)
+        + ' token　平均 ' + (d.avg_ms || 0) + 'ms' + fb;
+    }
+    const h = $('statHint');
+    if (h) {
+      h.textContent = '模型 ' + (d.model || '-') + '　语音 ' + (d.voice || '-')
+        + (d.last_err ? ('\n最近一次出错：' + d.last_err) : '');
+    }
+    if (manual) tip('已刷新');
+  } catch (e) { if (manual) tip('拿不到用量，检查网络'); }
+}
 async function loadPersonas() {
   const cur = $('personaCur'), box = $('personaList');
   cur.value = '加载中…'; box.innerHTML = '';
@@ -1029,8 +1070,8 @@ async function loadModelCfg(force) {
             mCur.chat, '（先拉列表）');
     fillSel('mVision', mGroups.vision || [], mCur.vision, '（同上）');
     fillSel('mImage', mGroups.image || [], mCur.image, '（同上）');
-    fillSel('mAudio', mGroups.audio || [], mCur.audio, '还没做，先留位置');
-    const SRC = { online: '刚从服务商拉到的最新列表', cache: '用的缓存，点下面可重新拉',
+    fillSel('mAudio', mGroups.audio || [], mCur.audio,
+            '内置语音合成（她发语音条用，名称见「今日用量」里的语音一栏）');    const SRC = { online: '刚从服务商拉到的最新列表', cache: '用的缓存，点下面可重新拉',
                   fallback: '拉不到，先用内置清单（可能不全）' };
     $('modelSrc').textContent = (SRC[d.source] || d.source || '') + '｜共 ' +
       (d.count || 0) + ' 个' + (d.err ? '（' + d.err + '）' : '');

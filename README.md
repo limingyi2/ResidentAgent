@@ -35,10 +35,11 @@
 | `brain/brain.py` | 决策核心：上下文组装、人设注入、API 失败兜底 |
 | `brain/memory_store_v2.py` | 长期记忆：bge-m3 向量检索，维度变化时索引自动重建 |
 | `brain/recap_store.py` | 历史摘要：聊过的内容按 日→周→月 三层滚动压缩，历史不会越滚越长 |
-| `brain/agenda.py` | 约定账本：带日期的约定按时间窗强制注入上下文，到点她自己会想起来 |
+| `brain/agenda.py` | 约定账本：带日期的约定按时间窗强制注入，且带状态（未到/办成/过期未办） |
 | `brain/life_engine.py` | 她自己的生活推演与夜间日记 |
 | `brain/moments.py` | 朋友圈 |
 | `brain/vision.py` | 图片视觉描述（云端 VL 模型转成一句话） |
+| `brain/voice.py` | 语音合成：她想用声音说时发语音条（CosyVoice2-0.5B，音色见 config 的 voice 段） |
 | `brain/persona_store.py` | 人设系统：白名单字段 + 全局身份底线，支持热重载 |
 | `brain/model_hub.py` | 模型中枢：拉取模型列表并按对话 / 看图 / 生图 / 语音分类 |
 | `brain/errlog.py` | 前后端错误日志，客户端可上报与导出 |
@@ -82,6 +83,7 @@ python pet/pet.py
 │   ├── agenda.py        约定账本：带日期的约定按时间窗强制带，到点自己想起来
 │   ├── moments.py       朋友圈      stickers.py   表情包
 │   ├── vision.py        图片视觉描述（云端 VL）
+│   ├── voice.py         语音合成：她发语音条（模型/音色写在 config 的 voice 段）
 │   ├── life_engine.py   她自己的生活 + 日记
 │   ├── worldgen.py      世界设定生成
 │   ├── persona_store.py 人设

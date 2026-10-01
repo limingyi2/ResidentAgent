@@ -117,6 +117,107 @@ def strip_say_marker(text):
     return "\n".join(lines).strip()
 
 
+def _trace_path():
+    try:
+        from paths import DATA_DIR
+        return os.path.join(str(DATA_DIR), "trace.jsonl")
+    except Exception:
+        return r"C:\linzhixia\data\trace.jsonl"
+
+
+def _trace_write(rec):
+    """每轮对话落一行 trace。
+
+    为什么要它（2026-10-01 加）：此前她答得不对，只能靠人 SSH 上去翻聊天存档猜。
+    这行记录回答的是"这轮是怎么产生出来的"——命中了哪几条记忆（含相似度）、
+    注入了哪些块各多少字、约定账本有没有带上、去重/静默闸门有没有拦、用了哪个
+    模型、延迟多少、token 花了多少、是不是走了欠费兜底。
+    **只记结构化的中间数据，不记模型内心活动**（那东西本来也没有）。
+    写文件失败一律静默：观测手段不能反过来把聊天搞挂。
+    """
+    try:
+        p = _trace_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _trace_tail(n=20):
+    p = _trace_path()
+    out = []
+    try:
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+    except OSError:
+        return []
+    return out[-int(n or 20):]
+
+
+def _stats_today():
+    """今天的用量汇总（App 设置页显示"今天聊了多少轮、花了多少 token"）。"""
+    today = time.strftime("%Y-%m-%d")
+    rows = [r for r in _trace_tail(4000) if str(r.get("t", "")).startswith(today)]
+    tok_in = sum(int(r.get("tok_in") or 0) for r in rows)
+    tok_out = sum(int(r.get("tok_out") or 0) for r in rows)
+    ms = [int(r.get("ms") or 0) for r in rows if r.get("ms")]
+    mem_hit = sum(1 for r in rows if int(r.get("mem_hits") or 0) > 0)
+    out = {
+        "date": today,
+        "turns": len(rows),
+        "tok_in": tok_in,
+        "tok_out": tok_out,
+        "fallback": sum(1 for r in rows if r.get("fallback")),
+        "mem_hit_turns": mem_hit,
+        "avg_ms": int(sum(ms) / len(ms)) if ms else 0,
+        "last_err": "",
+    }
+    try:
+        b = _LOCAL.get("brain")
+        out["last_err"] = (getattr(b, "last_err", "") or "") if b else ""
+        out["model"] = str((API_CFG or {}).get("model") or "")
+    except Exception:
+        pass
+    try:
+        import voice
+        out["voice"] = voice.describe(API_CFG)
+    except Exception:
+        pass
+    return out
+
+
+def resolve_voice_tag(text, api_config):
+    """把回复里的 [voice] 标记变成真语音条。
+
+    她只在想用声音说的时候加这个标记（规则写在 persona_store 的说话规则里）。
+    命中后：把整段文字合成为 mp3，替换成 `[voice:文件名]`，App 那边渲染成可播放的语音条。
+    合成失败就把标记悄悄去掉、正文照发 —— 语音是锦上添花，不能反过来害消息发不出去。
+    模型与音色名见 voice.describe()（当前 CosyVoice2-0.5B : diana，2026-10-01 定）。
+    """
+    raw = (text or "")
+    if "[voice]" not in raw and "[语音]" not in raw:
+        return raw
+    spoken = raw.replace("[voice]", "").replace("[语音]", "").strip()
+    spoken = re.sub(r"\n+", " ", spoken)
+    try:
+        import voice
+        name = voice.synth(spoken, api_config)
+    except Exception as e:
+        print("[语音] 调用失败：%s" % str(e)[:120], flush=True)
+        name = ""
+    if not name:
+        return spoken
+    return "[voice:%s]\n%s" % (name, spoken)
+
+
 def resolve_gen_tags(text, look=""):
     """把回复里单独成行的 [gen:描述] 真的生成一张图，替换成 [img:文件名]。
 
@@ -542,6 +643,8 @@ def ask_with_retry(text, img_b64=None):
             except Exception:
                 look = ""
             ans = resolve_gen_tags(strip_say_marker(ans), look)
+            # 她加了 [voice] 就合成真语音条（失败自动降级成纯文字）
+            ans = resolve_voice_tag(ans, API_CFG)
             # 存档记的是处理后的正文（带 [img:gen_xxx.png]，App 能直接显示）
             try:
                 _LOCAL["brain"]._log_turn(text, ans, img=img_path or None)
@@ -734,6 +837,87 @@ def _proactive_quota_file():
     except Exception:
         return os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "data", "proactive_quota.json")
+
+
+def _proactive_stats_file():
+    try:
+        from paths import DATA_DIR
+        return os.path.join(str(DATA_DIR), "proactive_stats.json")
+    except Exception:
+        return r"C:\linzhixia\data\proactive_stats.json"
+
+
+def _proactive_stats_load():
+    try:
+        d = json.load(open(_proactive_stats_file(), encoding="utf-8"))
+        if isinstance(d, dict):
+            d.setdefault("sent", [])
+            d.setdefault("last_user_ts", 0)
+            return d
+    except Exception:
+        pass
+    return {"sent": [], "last_user_ts": 0}
+
+
+def _proactive_stats_save(d):
+    try:
+        d["sent"] = (d.get("sent") or [])[-40:]
+        p = _proactive_stats_file()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _proactive_note_sent():
+    """她主动发了一条 —— 记下来，等他的反应来评判这次该不该发。"""
+    d = _proactive_stats_load()
+    d["sent"].append({"ts": int(time.time()), "replied": 0})
+    _proactive_stats_save(d)
+
+
+def _proactive_note_user():
+    """他说话了 —— 把最近 3 小时内还没被回应的那条主动消息标成"他回了"。
+
+    这是自适应频率唯一的反馈信号：主动发了之后他理不理。
+    """
+    now = int(time.time())
+    d = _proactive_stats_load()
+    changed = False
+    for s in reversed(d.get("sent") or []):
+        if s.get("replied"):
+            continue
+        if now - int(s.get("ts") or 0) <= 3 * 3600:
+            s["replied"] = 1
+            s["gap"] = now - int(s.get("ts") or 0)
+            changed = True
+        break                      # 只认最近那一条
+    d["last_user_ts"] = now
+    _proactive_stats_save(d)
+
+
+def _proactive_interval_multiplier():
+    """按最近主动消息的"被回应率"给间隔乘一个系数（2026-10-01 加）。
+
+    以前是死板的固定间隔。真人的分寸感来自反馈：发了之后对方理不理。
+    最近 10 次里：
+        回应率 ≥ 0.5   → ×1.0（他爱聊，正常节奏）
+        0.25 ~ 0.5     → ×1.5（有点冷，收敛些）
+        < 0.25         → ×2.0（基本不理，别烦人）
+    另外：如果他刚刚（15 分钟内）说过话，这轮直接推迟 —— 他人在，不需要"找"他。
+    """
+    d = _proactive_stats_load()
+    sent = (d.get("sent") or [])[-10:]
+    replied = sum(1 for s in sent if s.get("replied"))
+    rate = (replied / float(len(sent))) if sent else None
+    if rate is None:
+        return 1.0
+    if rate >= 0.5:
+        return 1.0
+    if rate >= 0.25:
+        return 1.5
+    return 2.0
 
 
 def _proactive_used_today():
@@ -1136,14 +1320,46 @@ def start_remote_api(brain):
             path = self.path.split("?")[0]
             try:
                 if path == "/api/chat":
+                    _in_text = str(body.get("text") or "")
+                    try:
+                        _proactive_note_user()   # 他说话了：给自适应频率喂反馈
+                    except Exception:
+                        pass
                     ans, mode, err = ask_with_retry(
-                        str(body.get("text") or ""), body.get("img") or None)
+                        _in_text, body.get("img") or None)
                     # 出错就留一行（欠费 402、模型名写错、地址变了都在这儿现形）
                     if err:
                         try:
                             errlog.warn("api/chat", f"{mode}：{err}")
                         except Exception:
                             pass
+                    # 每轮一行 trace：这轮怎么产生的（记忆命中/块大小/延迟/token）
+                    try:
+                        _b = _LOCAL.get("brain")
+                        _hits = getattr(getattr(_b, "mem", None), "last_hits", []) or []
+                        _ag = 0
+                        try:
+                            import agenda
+                            _ag = 1 if agenda.block() else 0
+                        except Exception:
+                            pass
+                        _u = getattr(_b, "last_usage", None) or {}
+                        _trace_write({
+                            "t": time.strftime("%Y-%m-%d %H:%M"),
+                            "kind": "chat",
+                            "in_len": len(_in_text),
+                            "blocks": getattr(_b, "last_sizes", {}) or {},
+                            "mem_hits": len(_hits),
+                            "mem_top": [round(float(s), 2) for s, _t in _hits[:3]],
+                            "agenda": _ag,
+                            "model": str((API_CFG or {}).get("model") or ""),
+                            "ms": getattr(_b, "last_ms", None),
+                            "tok_in": _u.get("in"), "tok_out": _u.get("out"),
+                            "mode": mode,
+                            "fallback": 1 if err or mode == "API失败" else 0,
+                        })
+                    except Exception:
+                        pass
                     # 带上这条回复的时刻：手机 App 靠它显示每条消息的时间。
                     # 以前不返回，前端 addMsg 只能传空串 —— 结果"刚聊完的消息
                     # 一条时间都没有"，只有重进页面走 /api/history 才带 t。
@@ -1397,6 +1613,18 @@ def start_remote_api(brain):
             elif path == "/api/diary/list":
                 days = _cloud_diary_list()
                 self._json(200, {"days": days})
+            elif path == "/api/stats":
+                # 用量与状态：App 设置页拿它显示"今天聊了多少轮、花了多少 token"
+                out = _stats_today()
+                try:
+                    import agenda
+                    out["agenda"] = agenda.stats()
+                except Exception:
+                    pass
+                self._json(200, out)
+            elif path == "/api/trace":
+                n = _query_param(self.path, "last") or 20
+                self._json(200, {"items": _trace_tail(n)})
             elif path == "/api/diary/read":
                 ds = _query_param(self.path, "date")
                 self._json(200, {"body": _cloud_diary_read(ds)})
@@ -1445,6 +1673,29 @@ def start_remote_api(brain):
                 except Exception:
                     pass
                 self._json(200, {"names": names})
+            elif path == "/api/voice":
+                # 她发的语音条（voice.py 合成，文件在 data/voice/）
+                name = _query_param(self.path, "name")
+                try:
+                    import voice
+                    p = voice.path_of(name)
+                except Exception:
+                    p = None
+                if not p:
+                    self._json(404, {"err": "no such voice"})
+                    return
+                try:
+                    with open(p, "rb") as f:
+                        blob = f.read()
+                except OSError:
+                    self._json(404, {"err": "read fail"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", str(len(blob)))
+                self.end_headers()
+                self.wfile.write(blob)
+                return
             elif path == "/api/img":
                 name = _query_param(self.path, "name")
                 blob = _cloud_sticker(name)
@@ -1704,7 +1955,21 @@ def run_server():
                 try:
                     # 每轮重新读配置：改完 config.json 不用重启大脑就生效
                     pa = _proactive_conf()
-                    interval = int(pa.get("interval_sec") or 2400)
+                    base = int(pa.get("interval_sec") or 2400)
+                    interval = base
+                    if pa.get("adaptive", True):
+                        # 自适应频率：按"上次主动后他理不理"伸缩（见
+                        # _proactive_interval_multiplier）。上限 2 小时 ——
+                        # 再冷也别变成半小时一条，那已经算骚扰了。
+                        interval = int(base * _proactive_interval_multiplier())
+                        cap = int(pa.get("max_interval_sec") or 7200)
+                        interval = min(interval, cap)
+                        # 他刚说过话（15 分钟内）→ 人在，不需要"找"他
+                        _d = _proactive_stats_load()
+                        _gap = time.time() - int(_d.get("last_user_ts") or 0)
+                        if _gap < 900:
+                            time.sleep(max(300, interval))
+                            continue
                     time.sleep(max(300, interval))
                     if not pa.get("enabled", True):
                         continue
@@ -1735,6 +2000,7 @@ def run_server():
                     text = resolve_gen_tags(text)
                     if not text:
                         continue
+                    text = resolve_voice_tag(text, API_CFG)
                     # 去重闸门：她最近已经说过（或截一段说过）就不再发第二遍。
                     # 原因见 _recent_her_texts —— 主动搭话会复述上下文里自己刚说的话。
                     if _is_repeat_of_recent(text):
@@ -1743,6 +2009,7 @@ def run_server():
                         continue
                     _cloud_append_assistant(text)
                     _proactive_count_up()
+                    _proactive_note_sent()      # 记下这次主动，等他反应（自适应频率用）
                     print("[大脑] 她主动找他说话了（今天第 %d 次）"
                           % (used + 1), flush=True)
                 except Exception as e:

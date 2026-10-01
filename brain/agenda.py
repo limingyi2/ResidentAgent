@@ -56,6 +56,22 @@ PRUNE_DAYS = 60          # 超过这么多天的旧条目清掉（文件别无�
 BLOCK_CAP = 600          # 注入块字数上限
 CACHE_TTL = 60           # block() 内存缓存秒数
 
+# 状态机（2026-10-01 加）
+#   pending  还没到（日期在今天之后）
+#   due      就是今天
+#   missed   日期已经过去，且没有任何"办成了"的证据 —— 注入时会明说"那天过去了、没记到办成"，
+#            并且**绝不允许把它挪到新日期当成未来的事**（用户 2026-10-01 反馈的"昨天说明天来、
+#            今天还说明天"就是这类滑动；以前只靠提示词，现在落成状态）
+#   done     确实办成了（接口手工标记，或记忆里出现该条约定的高置信完成证据）
+# done 的条目不再注入（已经发生过的约定没必要每天念），但留在文件里备查。
+STATUS_DONE = "done"
+STATUS_MISSED = "missed"
+
+# "办成了"的证据词。要配合"和条目文本有 ≥4 个连续汉字重合"才认，避免误判
+DONE_HINTS = ("已办", "办成", "办好了", "完成了", "搞定了", "见到了", "见着了",
+              "已经见", "已到", "去过了", "已经去", "接上了", "定下来了")
+
+
 _CACHE = {"t": 0.0, "text": ""}
 
 # ---- 日期表达白名单（顺序即优先级）----
@@ -191,6 +207,130 @@ def _load_mem_items(mem_path):
         return []
 
 
+def _status(it):
+    """条目状态。没有 status 字段的老条目按日期现算，不用迁移文件。"""
+    s = (it.get("status") or "").strip()
+    if s in (STATUS_DONE, STATUS_MISSED):
+        return s
+    try:
+        d = datetime.date.fromisoformat(it.get("date") or "")
+    except ValueError:
+        return ""
+    return STATUS_MISSED if d < datetime.date.today() else ""
+
+
+def settle(today=None):
+    """把过期的约定落成 missed（每天算一次即可，幂等）。
+
+    为什么要落状态而不是每次现算：现算只能让注入块"这次别说成未来"，
+    而状态是要给后面用的 —— 标记过 missed 的条目不参与"还差几天"的提示，
+    也不会因为日期被人手改了就悄悄复活。**这里不删除任何条目**，
+    只是盖章，删不删由人决定。
+    """
+    today = today or datetime.date.today()
+    items = _load()
+    n = 0
+    for it in items:
+        if it.get("status") == STATUS_DONE:
+            continue
+        try:
+            d = datetime.date.fromisoformat(it.get("date") or "")
+        except ValueError:
+            continue
+        if d < today and it.get("status") != STATUS_MISSED:
+            it["status"] = STATUS_MISSED
+            it["settled"] = today.isoformat()
+            n += 1
+    if n:
+        _save(items)
+        _CACHE["t"] = 0.0
+        print("[约定] 结算：%d 条过期约定标记为 missed" % n, flush=True)
+    return n
+
+
+def mark_done(match, date=None):
+    """把某条约定标成已办成。match 是文本片段，date 可选（ISO 日期）。
+
+    只用于"确实办成了"的情况（手工接口，或高度确信的证据）。标了之后
+    这条不再注入上下文 —— 已经发生过的事不必每天念。
+    """
+    items = _load()
+    hit = 0
+    for it in items:
+        if it.get("status") == STATUS_DONE:
+            continue
+        if match and match not in (it.get("text") or ""):
+            continue
+        if date and it.get("date") != date:
+            continue
+        it["status"] = STATUS_DONE
+        it["done_at"] = datetime.date.today().isoformat()
+        hit += 1
+    if hit:
+        _save(items)
+        _CACHE["t"] = 0.0
+    return hit
+
+
+def _common_run(a, b, need=4):
+    """a、b 里有没有长度 ≥need 的连续汉字片段。用于"办成了"证据的保守匹配。"""
+    a = re.sub(r"[^\u4e00-\u9fa5]", "", a or "")
+    b = re.sub(r"[^\u4e00-\u9fa5]", "", b or "")
+    if len(a) < need or len(b) < need:
+        return False
+    for i in range(len(a) - need + 1):
+        if a[i:i + need] in b:
+            return True
+    return False
+
+
+def auto_done_from_memory(mem_path=None):
+    """扫记忆里"已经办成"的事件，把对应日期的约定标 done。
+
+    保守到近乎悲观：要求 ①事件文本里有明确的完成词；②能解析出日期；
+    ③和条目文本有 ≥4 个连续汉字重合。三者齐了才标 —— 宁可少标（她多提一次
+    旧约定，无害），也不能把没办成的事说成办成了（那是编）。
+    """
+    items = _load_mem_items(mem_path or DEFAULT_MEM)
+    hit = 0
+    for it in items:
+        if (it.get("type") or "") != "event":
+            continue
+        text = it.get("text") or ""
+        if not any(h in text for h in DONE_HINTS):
+            continue
+        base = _base_date(it.get("time"))
+        if not base:
+            continue
+        d = parse_date(text, base)
+        if not d:
+            continue
+        for ag in _load():
+            if ag.get("date") != d.isoformat():
+                continue
+            if ag.get("status") == STATUS_DONE:
+                continue
+            if _common_run(ag.get("text") or "", text):
+                if _mark_one(ag):
+                    hit += 1
+    return hit
+
+
+def _mark_one(ag):
+    """按 (date, text) 精确匹配落 done（不是靠对象引用，避免读的是另一份副本）。"""
+    items = _load()
+    for x in items:
+        if x.get("date") == ag.get("date") and x.get("text") == ag.get("text"):
+            if x.get("status") != STATUS_DONE:
+                x["status"] = STATUS_DONE
+                x["done_at"] = datetime.date.today().isoformat()
+                _save(items)
+                _CACHE["t"] = 0.0
+                return True
+            return False
+    return False
+
+
 # ---------------------------------------------------------------- 主流程
 
 def refresh(mem_path=None, verbose=False):
@@ -251,10 +391,19 @@ def refresh(mem_path=None, verbose=False):
     if added or pruned:
         _save(keep)
         _CACHE["t"] = 0.0
+    # 状态机结算（2026-10-01 加）：
+    #   ① settle：日期过了的还是"未标记办成" → 盖 missed 章（不删条目）
+    #   ② auto_done：记忆里出现高置信的"办成了"证据 → 盖 done 章
+    # 两步都只读盘，很便宜；放在 refresh 里跟着摘要循环（20 分钟）跑。
+    settled = settle(today)
+    done_hits = auto_done_from_memory(mem_path)
     if verbose and (added or pruned):
-        print("[约定] 新增 %d 条、清理 %d 条，账本共 %d 条"
-              % (added, pruned, len(keep)), flush=True)
-    return {"added": added, "pruned": pruned, "total": len(keep)}
+        print("[约定] 新增 %d 条、清理 %d 条，账本共 %d 条" % (added, pruned, len(keep)),
+              flush=True)
+    if settled or done_hits:
+        print("[约定] 结算 %d 条过期、%d 条标为已办成" % (settled, done_hits), flush=True)
+    return {"added": added, "pruned": pruned, "total": len(keep),
+            "settled": settled, "done": done_hits}
 
 
 def _label(d, today):
@@ -287,20 +436,23 @@ def block(cap=BLOCK_CAP, today=None, use_cache=True):
             d = datetime.date.fromisoformat(it.get("date") or "")
         except ValueError:
             continue
+        st = _status(it)
+        if st == STATUS_DONE:
+            continue          # 已办成的不再念（发生过的事不必每天提）
         if lo <= d <= hi:
-            sel.append((d, (it.get("text") or "").strip()))
-    sel = [(d, t) for d, t in sel if t]
+            sel.append((d, (it.get("text") or "").strip(), st))
+    sel = [(d, t, s) for d, t, s in sel if t]
     if not sel:
         _CACHE["t"], _CACHE["text"] = now, ""
         return ""
 
     sel.sort(key=lambda x: x[0])
-    future = [(d, t) for d, t in sel if d >= today]
-    past = [(d, t) for d, t in sel if d < today]
+    future = [(d, t) for d, t, _s in sel if d >= today]
+    past = [(d, t, s) for d, t, s in sel if d < today]
 
     lines, used = [], 0
     for title, items in (("还没到的：", future),
-                         ("已经过完的日子（别再当约好的事提）：", past)):
+                         ("已经过完的日子（别当约好的事提，也别把日期改到新日子）：", past)):
         if not items or used + len(title) > cap:
             if items:
                 break
@@ -308,8 +460,14 @@ def block(cap=BLOCK_CAP, today=None, use_cache=True):
         lines.append(title)
         used += len(title)
         full = False
-        for d, t in items:
-            seg = "· %s：%s" % (_label(d, today), t)
+        for row in items:
+            if len(row) == 2:
+                d, t = row
+                seg = "· %s：%s" % (_label(d, today), t)
+            else:
+                d, t, s = row
+                tag = "没办成" if s == STATUS_MISSED else "那天过去了"
+                seg = "· %s（%s）：%s" % (_label(d, today), tag, t)
             if used + len(seg) > cap:
                 full = True
                 break
@@ -325,30 +483,41 @@ def block(cap=BLOCK_CAP, today=None, use_cache=True):
     # 隔了 4000 多字，模型的注意力早散了。日期紧贴条目，才建立得起
     # "9月25日 = 4 天前" 这种关系（2026-09-29 实测：不写这句她就把
     # 已经过完的 25 号当成还没到的安排，一直说"到时候见"）。
+    #
+    # 2026-10-01 补两条硬约束（用户反馈"昨天说明天要来、今天还说明天"）：
+    #   ① 过去的事不许顺延成新的日子（"那次没办成"就承认没办成，或者干脆不提）；
+    #   ② 说未来必须带具体日期，不许只用"明天/后天"——相对词过一夜就指错日子。
     wk = "一二三四五六日"[today.weekday()]
     text = ("【日程】今天是 %d月%d日（周%s）。他提过的事都在下面，别装不知道。"
             "分两段看：“还没到的”是往后要办的；“已经过完的日子”是指那天"
             "已经过去了 —— 提它要用“那次”“当时”这种过去说法，"
-            "别说“到时候见”、别当成还没到。别主动加码承诺新的。\n"
+            "别说“到时候见”、别当成还没到。\n"
+            "两条硬规矩：不管哪件事，日期已经过去的就不许顺延成新的日子"
+            "（没办成就是没办成，不许改口说“明天去”）；要提以后的事，"
+            "必须带上具体日期（比如“10月3日”），别只用“明天”“后天”"
+            "这种说法，过一夜就指错日子了。别主动加码承诺新的。\n"
             % (today.month, today.day, wk) + "\n".join(lines))
     _CACHE["t"], _CACHE["text"] = now, text
     return text
 
 
 def stats(today=None):
-    """排查用：账本里有什么、哪些在窗口内"""
+    """排查用：账本里有什么、哪些在窗口内、各自什么状态"""
     today = today or datetime.date.today()
     items = _load()
     lo = today - datetime.timedelta(days=PAST_WINDOW)
     hi = today + datetime.timedelta(days=FUTURE_WINDOW)
     inwin = []
+    by_status = {}
     for it in items:
+        st = _status(it) or "pending"
+        by_status[st] = by_status.get(st, 0) + 1
         try:
             d = datetime.date.fromisoformat(it.get("date") or "")
         except ValueError:
             continue
         if lo <= d <= hi:
-            inwin.append((d.isoformat(), it.get("text")))
+            inwin.append((d.isoformat(), st, it.get("text")))
     inwin.sort()
-    return {"total": len(items), "in_window": inwin,
+    return {"total": len(items), "by_status": by_status, "in_window": inwin,
             "block_chars": len(block(use_cache=False, today=today))}

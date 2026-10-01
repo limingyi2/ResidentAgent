@@ -325,6 +325,7 @@ class Brain:
         if not self.api.get("api_key"):
             return None
         parts = [self.persona_text]
+        _rb_len = 0
         tm = self._time_hint()
         if tm:
             parts.append("\n" + tm)
@@ -340,6 +341,7 @@ class Brain:
             rb = recap_store.block()
             if rb:
                 parts.append("\n" + rb)
+                _rb_len = len(rb)
         except Exception:
             pass
         # query=他这轮说的话：日记正文只在他问到的时候才带（2026-09-29）
@@ -378,6 +380,24 @@ class Brain:
         if life:
             tail += "\n" + LIFE_RULES
         msgs.append({"role": "user", "content": tail})
+        # 记下这一轮的"料"有多大：出问题时第一眼看的就是这个
+        # （2026-10-01 加，配合 trace 落盘；哪块突然膨胀 = 哪里写坏了）
+        self.last_sizes = {
+            "persona": len(self.persona_text),
+            "time": len(tm or ""),
+            "memory": len(memory_block or ""),
+            "history_note": len(HIST_TIME_NOTE) if any(
+                str(m.get("content") or "").startswith("[")
+                for m in self.hist[1:] if m.get("role") != "system") else 0,
+            "recap": _rb_len,
+            "life": len(life or ""),
+            "rules": len(self.draft_rules or "") + (len(LIFE_RULES) if life else 0),
+            "hist_msgs": len(self.recent_hist()),
+            "total": sum(len(m.get("content") or "") for m in msgs),
+        }
+        self.last_usage = None
+        self.last_ms = None
+        _t0 = time.time()
         try:
             r = httpx.post(
                 self.api["api_base"].rstrip("/") + "/chat/completions",
@@ -392,9 +412,21 @@ class Brain:
                 timeout=60,
             )
             r.raise_for_status()
-            return _clean(r.json()["choices"][0]["message"]["content"],
+            _j = r.json()
+            self.last_ms = int((time.time() - _t0) * 1000)
+            # token 用量：硅基流动（OpenAI 兼容）会在 usage 里回，拿不到就算了 ——
+            # 没有它就只能看余额，那次"她突然只会说脑子转不动"就是这么晚才发现的
+            try:
+                _u = _j.get("usage") or {}
+                self.last_usage = {"in": int(_u.get("prompt_tokens") or 0),
+                                   "out": int(_u.get("completion_tokens") or 0)}
+            except Exception:
+                self.last_usage = None
+            return _clean(_j["choices"][0]["message"]["content"],
                           keep_newlines=True)
-        except Exception:
+        except Exception as e:
+            self.last_ms = int((time.time() - _t0) * 1000)
+            self.last_err = "%s: %s" % (type(e).__name__, str(e)[:120])
             return None
 
     # ---------- 朋友圈专用：不走聊天框架 ----------

@@ -1,37 +1,30 @@
 {
   "_说明": "这是配置模板。复制为 config.json 后填入你自己的值；config.json 已被 .gitignore 忽略，不会进仓库。",
-
   "api_base": "https://api.siliconflow.cn/v1",
   "api_key": "在这里填你的服务商 API Key",
   "model": "zai-org/GLM-5.3",
   "memory_dir": "在这里填记忆目录的绝对路径，例如 D:\\your-project\\brain\\data\\memory",
   "chat_mode": "api",
   "persona_file": "personas/linzhixia.json",
-
   "window": {
     "level": "bottom",
     "sink_on_fullscreen": false
   },
-
   "brain_token": "云端 /api/* 的访问码，客户端（App / 桌宠）用同一个值，随便编一个长随机串",
   "bind_host": "部署到云服务器时填 0.0.0.0 才能被手机连到；本机跑就删掉这行（默认只绑 127.0.0.1）",
-
   "watchdog": {
     "keep_pet": true
   },
-
   "vision": {
     "enabled": true,
     "model": "Qwen/Qwen3-VL-30B-A3B-Instruct",
     "max_side": 640,
     "max_tokens": 200
   },
-
   "time_awareness": {
     "enabled": true,
     "absence_minutes": 30
   },
-
   "proactive": {
     "_说明": "主动搭话。quiet_start~quiet_end 之间她不会主动开口（支持跨零点，如 23:00~07:00）；max_per_day 是每天最多主动几条；interval_sec 是检查间隔。留空或写错格式＝不静默。",
     "enabled": true,
@@ -41,9 +34,11 @@
     "quiet_end": "07:00",
     "on_activity_change": true,
     "on_game_start": true,
-    "on_startup": true
+    "on_startup": true,
+    "adaptive": true,
+    "max_interval_sec": 7200,
+    "_adaptive说明": "自适应频率：按最近主动消息的\"被回应率\"伸缩间隔（≥0.5→×1，0.25~0.5→×1.5，<0.25→×2），上限 max_interval_sec；他 15 分钟内说过话则这轮推迟。"
   },
-
   "watcher": {
     "enabled": true,
     "probe_sec": 5,
@@ -51,6 +46,13 @@
     "game_pause": true,
     "title_proactive_interval": 2400
   },
-
-  "brain_remote": "http://127.0.0.1:18787"
+  "brain_remote": "http://127.0.0.1:18787",
+  "voice": {
+    "_说明": "语音合成（她发语音条用）。模型与音色名都写在配置里，便于确认用的是哪个。注意 voice 参数在接口里要写成「模型名:音色名」，代码已处理。",
+    "enabled": true,
+    "model": "FunAudioLLM/CosyVoice2-0.5B",
+    "voice": "diana",
+    "_音色可选": "女声：anna（沉稳）bella（激情）claire（温柔）diana（欢快）；男声：alex benjamin charles david",
+    "speed": 1.0
+  }
 }
