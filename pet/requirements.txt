@@ -1,0 +1,5 @@
+# 桌宠（Windows 客户端）运行所需。桌宠是纯客户端，大脑在云端（见 brain_remote 配置）。
+# 它 import 了 brain 下的模块，所以先装大脑那份依赖。
+-r ../brain/requirements.txt
+PyQt6>=6.11.0          # 桌面界面
+psutil>=7.2.2          # 活动监视（你在用哪个程序 -> 决定她要不要主动说话）
