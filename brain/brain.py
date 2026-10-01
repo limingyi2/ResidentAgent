@@ -128,9 +128,15 @@ def _clean(s, keep_newlines=False):
         s = s.split("<think>")[0]
     s = s.replace("</think>", "")
 
+    # 时间标签前缀：上下文里每条历史都带 `[09-29 06:18] `（见 Brain._stamp），
+    # 便宜模型会把它当正文模仿，开头也写个方括号时间戳（2026-10-01 实测：
+    # "[10-01 12:38] 那就现学呗…"）。HIST_TIME_NOTE 里明写了不要模仿，但它在
+    # 提示词中段、注意力不够 —— 与其指望模型守规矩，不如在所有输出的必经
+    # 出口直接剥掉。只剥开头的（正文里她提到时间是另一回事）。
     if keep_newlines:
         out = []
         for ln in s.split("\n"):
+            ln = re.sub(r"^\[\d{1,4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*", "", ln)
             ln = re.sub(r"^(角色|角色|角色|角色)\s*[:：]\s*", "", ln)
             ln = re.sub(r"^[\"“”「」『』\s]+", "", ln)
             ln = re.sub(r"[\"“”「」『』\s]+$", "", ln)
@@ -139,6 +145,7 @@ def _clean(s, keep_newlines=False):
                 out.append(ln)
         return "\n".join(out)
 
+    s = re.sub(r"^\[\d{1,4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*", "", s)
     s = re.sub(r"^(角色|角色|角色|角色)\s*[:：]\s*", "", s)
     # 引号：开头和结尾都要去（之前只去了开头，"“你好”" 会剩个尾巴）
     s = re.sub(r"^[\"“”「」『』\s]+", "", s)

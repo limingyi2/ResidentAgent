@@ -384,7 +384,7 @@ body.notab .page { bottom:0; }
 /* ================= 基础 ================= */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 14;   // 14 = 每条消息显示时刻（间隔>5分钟插时间线）+ 历史放宽到 300 条（2026-09-29）
+const APP_CODE  = 15;   // 15 = 修"重开 App 不显示最新消息"：历史改成增量渲染 + 吸底改为 ResizeObserver 观察每行 + 程序滚动不再被误判成用户上翻（2026-10-01）
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
@@ -566,6 +566,7 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
       const el = document.createElement('div');
       el.className = 'time'; el.textContent = fmtT(d);
       $('list').appendChild(el);
+      _newNodes.push(el);
     }
     lastT = d;
   }
@@ -584,6 +585,7 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
     const im = document.createElement('img');
     im.src = src;
     im.onload = () => scrollBottom();      // 图片撑高列表后仍要贴回底部
+    im.onerror = () => scrollBottom();     // 加载失败也要：行可能从占位变矮
     im.onclick = () => view(im.src);
     bub.appendChild(im);
     const shown = cleanMine(raw);
@@ -598,6 +600,7 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
       const im = document.createElement('img');
       im.src = api('/api/img') + '&name=' + encodeURIComponent(m[1].trim());
       im.onload = () => scrollBottom();    // 同上：图加载完再贴一次底
+      im.onerror = () => scrollBottom();
       im.onclick = () => view(im.src);
       bub.appendChild(im);
       idx = re.lastIndex;
@@ -613,33 +616,107 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
   bub.addEventListener('touchend', () => clearTimeout(tmr));
   bub.addEventListener('touchmove', () => clearTimeout(tmr));
   row.appendChild(av); row.appendChild(bub); $('list').appendChild(row);
+  _newNodes.push(row);
+  if (_ro) { try { _ro.observe(row); } catch (e) {} }
   scrollBottom();
 }
 // 聊天窗吸底：进聊天页/来新消息时贴住最底部；他往上翻历史就停（autoPin=false）。
-// 之前"点进去乱蹦、蹦到上面的聊天记录"的根因：历史里的图片是**异步加载**的，
-// scrollBottom 执行那一刻图片还没撑开高度，等图陆续加载完、整个列表变高，
-// 视口就"飘"到了中间的历史消息里。现在每张图 onload 后只要还处于吸底状态
-// 就再贴一次底，用户往上翻了就不再打扰。
+//
+// 2026-10-01 再修一次（前一个版本仍会"重开 App 停在旧消息"）：
+//  1) 只靠每张图的 onload 补贴底不够 —— 图片加载失败（onerror 没绑）、
+//     或者列表因其它原因变高，都不会触发补贴。现在交给 ResizeObserver：
+//     只要处于吸底状态，列表高度一变就自动贴回去。
+//  2) 更要命的是"程序自己滚动"被误判成"用户上翻"：innerHTML 清空重绘会把
+//     scrollTop 归零，浏览器随后抛 scroll 事件，旧代码据此把 autoPin 永久
+//     关掉，之后怎么补都贴不回底部。现在程序滚动后 700ms 内忽略 scroll 事件。
+//  3) 图片没有尺寸占位，加载前后高度剧变 → 加载期间用 settlePin() 连续补贴。
 let autoPin = true;
-function scrollBottom(force) {
+let pinUntil = 0;
+let _newNodes = [];                 // addMsg 这次创建出来的 DOM（增量渲染要用）
+function pinNow() {
   const b = $('list');
-  if (force) autoPin = true;
-  if (!autoPin) return;
+  pinUntil = Date.now() + 700;      // 标记：接下来这段时间的 scroll 不是用户翻的
   b.scrollTop = b.scrollHeight;
 }
+function scrollBottom(force) {
+  if (force) autoPin = true;
+  if (autoPin) pinNow();
+}
+let pinTimer = null;
+function settlePin() {
+  // 图片是异步加载的，加载完列表才长高 —— 加载期间每隔 300ms 补贴一次底，
+  // 最多补 3 秒；用户中途自己上翻（autoPin=false）就立刻停手。
+  clearInterval(pinTimer);
+  let n = 0;
+  pinTimer = setInterval(() => {
+    if (!autoPin) { clearInterval(pinTimer); return; }
+    pinNow();
+    if (++n > 10) clearInterval(pinTimer);
+  }, 300);
+}
 $('list').addEventListener('scroll', () => {
+  if (Date.now() < pinUntil) return;   // 是我们自己滚的，不算用户上翻
   const b = $('list');
   autoPin = b.scrollHeight - b.scrollTop - b.clientHeight < 120;
 });
+// 注意：不能直接 observe(#list) —— #list 是滚动容器，它自己的尺寸不变，
+// 变的是里面的内容（scrollHeight），ResizeObserver 不会报。要观察每一条消息行：
+// 行里的图片一加载完、行变高，就会触发，然后自动贴回底部。
+let _ro = null;
+try {
+  if (window.ResizeObserver) {
+    _ro = new ResizeObserver(() => { if (autoPin) pinNow(); });
+  }
+} catch (e) {}
 function copyText(s) {
   if (!s) return;
   if (navigator.clipboard) navigator.clipboard.writeText(s).then(() => tip('已复制'), () => {});
   else tip('长按选择复制');
 }
 let histSig = '';
+let msgNodes = [];                  // [{key, els}] —— 增量渲染时用来删掉滑出窗口的旧消息
+function keyOf(it) {
+  return (it.t || '') + '|' + (it.role || '') + '|' + (it.text || '') + '|' + (it.img || '');
+}
+function addTracked(it) {
+  _newNodes = [];
+  addMsg(it.role === 'user' ? 'user' : 'assistant', it.text, it.t,
+         it.role === 'user' ? (it.img || '') : '', false);
+  return { key: keyOf(it), els: _newNodes.slice() };
+}
 function renderHistory(items) {
+  // 全量重绘（只在增量算不出来时才走这条）：会清空 DOM、滚动位置必丢，
+  // 所以调用方之后必须 force 贴底 —— 2026-10-01 之前就是每次轮询都走这条，
+  // 才出现"重开 App 停在旧消息"。
   lastDay = ''; lastT = ''; $('list').innerHTML = '';
-  items.forEach(it => addMsg(it.role === 'user' ? 'user' : 'assistant', it.text, it.t, it.role === 'user' ? (it.img || '') : '', false));
+  msgNodes = [];
+  items.forEach(it => msgNodes.push(addTracked(it)));
+}
+function updateHistory(items) {
+  // 增量：只删掉滑出窗口（limit=300 的窗口会往前推）的旧节点、只追加新消息。
+  // 不动已有 DOM，就不会丢滚动位置，也不会有整列表重绘的闪烁。
+  if (!msgNodes.length) { renderHistory(items); return; }
+  const oldK = msgNodes.map(m => m.key);
+  const newK = items.map(keyOf);
+  let hitK = 0, hitI = -1;
+  for (let k = oldK.length; k > 0 && !hitK; k--) {
+    const sub = oldK.slice(-k);
+    for (let i = 0; i + k <= newK.length; i++) {
+      let ok = true;
+      for (let j = 0; j < k; j++) {
+        if (newK[i + j] !== sub[j]) { ok = false; break; }
+      }
+      if (ok) { hitK = k; hitI = i; break; }
+    }
+  }
+  if (!hitK) { renderHistory(items); return; }
+  for (let j = 0; j < hitI && j < msgNodes.length; j++) {
+    msgNodes[j].els.forEach(el => { try { el.remove(); } catch (e) {} });
+  }
+  msgNodes = msgNodes.slice(hitI);
+  for (let i = hitI + hitK; i < items.length; i++) {
+    msgNodes.push(addTracked(items[i]));
+  }
 }
 function markSeen(items) {
   try {
@@ -654,13 +731,15 @@ async function loadHistory(manual) {
     const items = d.items || [];
     const sig = JSON.stringify(items);
     if (sig !== histSig) {
-      const nearBottom = $('list').scrollHeight - $('list').scrollTop - $('list').clientHeight < 80;
+      const b = $('list');
+      const nearBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
       histSig = sig;
-      renderHistory(items);
+      updateHistory(items);                 // 优先增量；算不出来才整列表重绘
       if (nearBottom || manual) scrollBottom(true);   // force：进页面/本来就在底部就吸死
+      settlePin();                          // 图片加载期间持续补贴底
       markSeen(items);
       renderSess(items);
-    } else if (manual) renderSess(items);
+    } else if (manual) { renderSess(items); scrollBottom(true); settlePin(); }
   } catch (e) { if (manual) tip('刷新失败，检查网络'); }
 }
 async function sendText(t, img) {

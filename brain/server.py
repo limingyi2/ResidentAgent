@@ -762,6 +762,63 @@ def _proactive_count_up():
         pass
 
 
+def _recent_her_texts(n=12):
+    """她最近说过的 n 句话（读聊天存档尾部）。
+
+    主动搭话去重要用：她每轮主动说话时，上下文里就有自己刚说过的话，
+    模型会原样（或截一段）再吐一次 —— 2026-10-01 实测 08:43/09:43、
+    09-29 14:42/19:42、10-01 12:37/12:44 都是这么来的：前后没有他的消息
+    （说明是主动搭话写的），内容一字不差。不比对就写，用户看到的就是
+    "她把同一句话发两遍"。
+    """
+    try:
+        from paths import CHAT_LOG
+        p = str(CHAT_LOG)
+    except Exception:
+        p = r"C:\linzhixia\data\chat_history.jsonl"
+    out = []
+    try:
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("role") == "assistant":
+                    out.append(d.get("text") or "")
+    except OSError:
+        return []
+    return out[-int(n or 12):]
+
+
+def _norm_text(s):
+    """比对用的归一化：去空白、去时间戳前缀、全角转半角太麻烦只做基本清洗。"""
+    import re
+    s = str(s or "").strip()
+    s = re.sub(r"^\[\d{1,4}-\d{1,2}-\d{1,2}[ T]?\d{0,2}:?\d{0,2}\]?\s*", "", s)
+    return re.sub(r"\s+", "", s)
+
+
+def _is_repeat_of_recent(text, n=12):
+    """这句话是不是她最近已经说过的（含"截一段再说"的情况）。"""
+    cur = _norm_text(text)
+    if not cur:
+        return False
+    for old in _recent_her_texts(n):
+        o = _norm_text(old)
+        if not o:
+            continue
+        if cur == o:
+            return True
+        # 长的一条里截出短的一条（12:44 那条就是 12:37 那句的第一行）
+        if (len(cur) >= 8 and cur in o) or (len(o) >= 8 and o in cur):
+            return True
+    return False
+
+
 def _cloud_append_assistant(text):
     """往聊天存档追加一条她说的话（主动搭话用）。"""
     try:
@@ -1677,6 +1734,12 @@ def run_server():
                         continue
                     text = resolve_gen_tags(text)
                     if not text:
+                        continue
+                    # 去重闸门：她最近已经说过（或截一段说过）就不再发第二遍。
+                    # 原因见 _recent_her_texts —— 主动搭话会复述上下文里自己刚说的话。
+                    if _is_repeat_of_recent(text):
+                        print("[大脑] 主动搭话：和最近说过的话重复，这轮不发",
+                              flush=True)
                         continue
                     _cloud_append_assistant(text)
                     _proactive_count_up()
