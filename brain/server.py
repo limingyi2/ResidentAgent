@@ -47,7 +47,7 @@ except Exception:
     WORLD_PATH = os.path.join(HERE, "config", "world.json")
 
 
-# ---------------------------------------------------------------- 配置
+# --- 配置 ---
 
 def load_config():
     """读 config.json。读不到就用空 dict —— 后面给的是人话报错，不是栈。"""
@@ -480,7 +480,7 @@ MAX_CHARS = 400        # 单条消息上限，超了就拆
 API_TIMEOUT = 120      # 等她回答最多等多久
 
 
-# ---------------------------------------------------------------- 自己养一个她（独立模式）
+# --- 自己养一个她（独立模式） ---
 
 _LOCAL = {"brain": None, "lock": threading.Lock()}
 
@@ -570,7 +570,7 @@ def ask_with_retry(text, img_b64=None):
                 except Exception as e:
                     print(f"[大脑] 图片存档失败（不影响回复）：{e}", flush=True)
             # 他要自拍：不让模型“只打字不发图 / 用第三人称写场景”，直接照她此刻
-            # 的时间+地点现场生成一张，正文用第一人称短句 —— 2026-09-21 加
+            # 的时间+地点现场生成一张，正文用第一人称短句
             try:
                 if not img_b64 and _looks_like_selfie(text):
                     sp, place = _selfie_prompt(wear_override=_outfit_override(text))
@@ -612,7 +612,7 @@ def ask_with_retry(text, img_b64=None):
     return "", "", "大脑没起来"
 
 
-# ---------------------------------------------------------------- 发消息用的小工具
+# --- 发消息用的小工具 ---
 
 _SENT_END = "。！？!?…～~"
 _SOFT_END = "，、,；;：: "
@@ -727,7 +727,7 @@ PROACTIVE_RULES = """先看清楚现在几点、再看看要不要主动找他�
 除这两种内容外，不要输出任何别的话。"""
 
 
-# ---------- 主动搭话：配置 / 静默时段 / 每日限额 ----------
+# --- 主动搭话：配置 / 静默时段 / 每日限额 ---
 # interval、静默时段、每日上限都必须从 config 的 proactive 段读 ——
 # 写死的话用户就算设了静默，照样凌晨被连发消息
 
@@ -1869,7 +1869,7 @@ _SEEDED_AT = {"t": 0.0}      # 种开场圈的时刻；让 _moment_loop 的首�
 
 
 def _seed_initial_moment(b):
-    """启动时空着朋友圈太尴尬：她一条都没有的话，先用今天 / 昨天的经历种一条。
+    """朋友圈为空时先用最近经历种一条，避免首次打开一条都没有。
     失败就静默跳过（下次循环还会再试）。"""
     import moments
     try:
@@ -1907,7 +1907,7 @@ def run_server():
                          args=(_LOCAL["brain"],), daemon=True).start()
 
         # 历史摘要：把滑出窗口的旧对话压成"聊过什么"，让她不忘前几天。
-        # 以前 12 条窗口之外的原话是直接丢掉的，这就是"昨天聊的今天就忘"。
+        # 窗口外的原话直接丢且从不读回的话，她就会"昨天聊的今天就忘"。
         # 启动 60 秒后先补一次（把积压的压完），之后每 20 分钟
         def _recap_loop(b):
             import recap_store
@@ -1960,7 +1960,7 @@ def run_server():
                     print(f"[大脑] 朋友圈循环出错：{str(e)[:80]}", flush=True)
         threading.Thread(target=_moment_loop,
                          args=(_LOCAL["brain"],), daemon=True).start()
-        # 启动时空着朋友圈太尴尬：若一条都没有，先种一条（用今天/昨天的经历）
+        # 朋友圈为空时先种一条（用最近经历），别让首次打开空着
         threading.Thread(target=_seed_initial_moment,
                          args=(_LOCAL["brain"],), daemon=True).start()
 
@@ -1987,7 +1987,7 @@ def run_server():
                     time.sleep(max(300, interval))
                     if not pa.get("enabled", True):
                         continue
-                    # 静默时段默认 23:00~07:00。旧代码 24 小时不停，凌晨那 8 条就是这么来的
+                    # 静默时段默认 23:00~07:00，必须限制，否则凌晨也会连发搭话
                     qs = pa.get("quiet_start", "23:00")
                     qe = pa.get("quiet_end", "07:00")
                     if _in_quiet(qs, qe):

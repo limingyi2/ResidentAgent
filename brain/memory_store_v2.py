@@ -142,7 +142,7 @@ class MemoryStore:
         self.embed_dir = embed_dir or os.path.dirname(os.path.abspath(path))
         self.data = {"items": [], "meta": {"created": time.strftime("%Y-%m-%d %H:%M")}}
         self._load()
-        # ---- 向量索引（懒加载，加载一次后进内存）----
+        # --- 向量索引（懒加载，加载一次后进内存） ---
         self.vec_path = os.path.join(self.embed_dir, "vectors.npy")
         self.ids_path = os.path.join(self.embed_dir, "ids.json")
         self.meta_path = os.path.join(self.embed_dir, "embed_meta.json")
@@ -154,7 +154,7 @@ class MemoryStore:
         self._index_loaded = False
         self.last_hits = []          # 上一次 render() 命中的 (相似度, 文本)，见 render
 
-    # ---------- 持久化 ----------
+    # --- 持久化 ---
     def _load(self):
         if os.path.exists(self.path):
             try:
@@ -379,7 +379,7 @@ class MemoryStore:
         """
         if query:
             hits = self.retrieve(query, top_k=top_k, min_score=min_score)
-            self.last_hits = hits          # 给 trace 落盘用（2026-10-01 加）
+            self.last_hits = hits          # 给 trace 落盘用
             if hits:
                 return "你记得他的事（这些是真的，聊天时自然地用上）：\n" + "；".join(t for _, t in hits)
         items = self.data["items"][-max_items:]

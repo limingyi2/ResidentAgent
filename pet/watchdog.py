@@ -128,7 +128,7 @@ def main():
         wd = {}
     want_pet = bool(wd.get("keep_pet", True))
 
-    # 桌宠在不在：只看互斥量（本地接口 2026-09-29 已摘掉，端口没得探了）
+    # 桌宠在不在：只看互斥量（本地接口已摘掉，没有端口可探）
     pet_up = pet_singleton_held()
 
     log("桌宠：%s" % ("在" if pet_up else "不在"))
@@ -137,7 +137,7 @@ def main():
         log("都在，不用管。")
         return 0
 
-    # ---- 桌宠不在：把她拉起来 ----
+    # --- 桌宠不在：把她拉起来 ---
     if not want_pet:
         log("桌宠不在，但 watchdog.keep_pet = false，不动。")
         return 0

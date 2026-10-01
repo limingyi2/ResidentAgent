@@ -76,7 +76,7 @@ class SettingsDialog(QDialog):
 
         self._load_values()
 
-    # ---------------- 人设页 ----------------
+    # --- 人设页 ---
     def _persona_tab(self):
         w = QWidget()
         v = QVBoxLayout(w)
@@ -116,7 +116,7 @@ class SettingsDialog(QDialog):
         v.addStretch()
         return w
 
-    # ---------------- 主动搭话页 ----------------
+    # --- 主动搭话页 ---
     def _proactive_tab(self):
         w = QWidget()
         v = QVBoxLayout(w)
@@ -152,7 +152,7 @@ class SettingsDialog(QDialog):
         v.addStretch()
         return w
 
-    # ---------------- 时间感知页 ----------------
+    # --- 时间感知页 ---
     def _time_tab(self):
         w = QWidget()
         v = QVBoxLayout(w)
@@ -168,7 +168,7 @@ class SettingsDialog(QDialog):
         v.addStretch()
         return w
 
-    # ---------------- 桌面显示页 ----------------
+    # --- 桌面显示页 ---
     def _window_tab(self):
         w = QWidget()
         v = QVBoxLayout(w)
@@ -197,7 +197,7 @@ class SettingsDialog(QDialog):
         v.addStretch()
         return w
 
-    # ---------------- 读写 ----------------
+    # --- 读写 ---
     def _load_values(self):
         p = self.cur
         self.ed_name.setText(p.get("name", ""))

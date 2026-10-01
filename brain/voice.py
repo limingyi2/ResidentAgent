@@ -69,13 +69,13 @@ _VOICE_CACHE = {}
 # 每条必须带 provider/model：apply() 会把它们和 voice 一起写进 config，切换不再依赖
 # 散落各处的默认值；硅基的 key 一律加 sf_ 前缀，避免和阿里撞名（by_key 是按 key 查的）。
 VOICE_CATALOG = [
-    # ---- 兜底：旧平台的预置嗓，阿里全线故障时一键切回，代价是 24kHz 的合成味 ----
+    # --- 兜底：旧平台的预置嗓，阿里全线故障时一键切回，代价是 24kHz 的合成味 ---
     {"key": "sf_diana", "label": "预置 · 欢快女声（旧平台）", "group": "兜底",
      "provider": "siliconflow", "model": SF_MODEL,
      "name": "diana", "voice": "diana",
      "desc": "硅基预置嗓，一听就是机器；只在阿里侧出问题时应急"},
 
-    # ---- 阿里 Qwen-Audio-3.1：圈定的 7 条 ----
+    # --- 阿里 Qwen-Audio-3.1：圈定的 7 条 ---
     {"key": "zv_piper", "label": "绝区零 · 派派", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "zvpiper",
      "voice": "qwen-audio-3.1-tts-flash-zvpiper-246bc40bf08d47699b80bf7ac23f7e6b",
@@ -124,7 +124,7 @@ PREVIEW_TEXT = "刚刚下课，外面下了点小雨，我在楼门口等了一�
 
 
 def provider_of(cfg=None):
-    """当前用哪个平台。缺省 aliyun（2026-10-01 切换后的默认）。"""
+    """当前用哪个平台。缺省 aliyun。"""
     c = (cfg or {}).get("voice") or {}
     return str(c.get("provider") or DEFAULT_PROVIDER).lower()
 
@@ -217,7 +217,7 @@ def verify_catalog(cfg=None, timeout=30):
         except Exception:
             plat["aliyun"] = None
 
-    # --- 硅基（旧平台）---
+    # --- 硅基（旧平台） ---
     # 硅基的凭据在**顶层** api_base/api_key（那是聊天模型在用的同一份），不在 voice 段里
     # —— 跟阿里正好相反，别照着阿里的写法抄。
     sf_key = c.get("api_key") or (c.get("siliconflow") or {}).get("api_key") or ""
@@ -328,7 +328,7 @@ def synth(text, api_config, timeout=90):
     if prov == "aliyun":
         return _synth_aliyun(text, vcfg, api_config, timeout)
 
-    # ---- 旧平台（硅基）：OpenAI 兼容，响应体直接就是音频字节 ----
+    # --- 旧平台（硅基）：OpenAI 兼容，响应体直接就是音频字节 ---
     return _synth_siliconflow(text, api_config, vcfg, timeout)
 
 

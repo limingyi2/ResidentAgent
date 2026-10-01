@@ -224,7 +224,7 @@ class ActivityWatcher:
         self._count_date = None
         self._count_today = 0
 
-    # ---------- 主动搭话的闸门 ----------
+    # --- 主动搭话的闸门 ---
     def set_proactive(self, pro):
         """设置窗口保存后热更新。"""
         if isinstance(pro, dict):
@@ -269,7 +269,7 @@ class ActivityWatcher:
             self._count_today = 0
         self._count_today += 1
 
-    # ---------- 控制 ----------
+    # --- 控制 ---
     def start(self):
         if self._thread and self._thread.is_alive():
             return
@@ -283,7 +283,7 @@ class ActivityWatcher:
     def set_enabled(self, v):
         self.cfg["enabled"] = bool(v)
 
-    # ---------- 主循环 ----------
+    # --- 主循环 ---
     def _loop(self):
         while not self._stop.is_set():
             try:
@@ -302,7 +302,7 @@ class ActivityWatcher:
 
         now = time.time()
 
-        # ---- 打游戏：只用进程名判断 ----
+        # --- 打游戏：只用进程名判断 ---
         playing = looks_like_game(fg)
 
         # 「在打游戏」或「前台窗口铺满整个屏幕」都该让立绘躲开。
@@ -330,7 +330,7 @@ class ActivityWatcher:
         if self._last_game:
             self._last_game = False   # 游戏结束了
 
-        # ---- 只看窗口标题猜他在干嘛（零开销、零隐私成本）----
+        # --- 只看窗口标题猜他在干嘛（零开销、零隐私成本） ---
         guess = guess_from_title(fg)
         prev = self._last_fg.get("guess")
         if guess and guess != prev:
@@ -351,7 +351,7 @@ class ActivityWatcher:
                     "hook": "",
                 }, fg, source="title")
 
-    # ---------- 回调 ----------
+    # --- 回调 ---
     def _emit_game(self, playing, fullscreen, fg):
         """前台从"能看见桌面"切到"游戏/全屏"（或反过来）时通知界面。"""
         if not self.on_game:

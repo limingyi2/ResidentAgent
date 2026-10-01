@@ -125,7 +125,7 @@ DEFAULT_WORLD = {
 }
 
 
-# ---------- 让模型生成世界（比代码随机更自然、更多样） ----------
+# --- 让模型生成世界（比代码随机更自然、更多样） ---
 # 代码随机只有写死的十几个专业 / 城市可选，一眼模板感。真正"真人随机感"得交给模型：
 # 本地 27B 优先（零成本），云端兜底，都不可用才回退代码随机
 _WORLD_PROMPT = (
@@ -271,7 +271,7 @@ def generate_world_via_llm(api, timeout=180):
     return None
 
 
-# ---------- 时间工具 ----------
+# --- 时间工具 ---
 def _dt(d, minutes):
     return datetime.datetime.combine(d, datetime.time(minutes // 60, minutes % 60))
 
@@ -321,7 +321,7 @@ def _strip_self(s):
     return re.sub(r"^(?:我(?:现在|此刻|正|正在)?|现在|此刻)\s*", "", s)
 
 
-# ---------- 生活引擎 ----------
+# --- 生活引擎 ---
 class LifeEngine:
     """她自己的生活。所有写盘都在这一个类里，外面只管调 catch_up / life_block。"""
 
@@ -345,7 +345,7 @@ class LifeEngine:
         self.last_result = {}
         self.world = self.load_world()
 
-    # ---------- 她的世界 ----------
+    # --- 她的世界 ---
     def load_world(self):
         # world.json 不在（首次启动 / 被清空）-> 让模型生成一份（本地27B优先/云端兜底），都不行才代码随机
         if not os.path.exists(self.world_path):
@@ -444,7 +444,7 @@ class LifeEngine:
                         "别把有没有课、放不放假说死，要用「应该 / 大概 / 还不确定」的口气")
         return "\n".join(bits)
 
-    # ---------- 校历：放假没课，调休日按指定星期补课 ----------
+    # --- 校历：放假没课，调休日按指定星期补课 ---
     def _calendar(self):
         return self.world.get("calendar") or {}
 
@@ -546,7 +546,7 @@ class LifeEngine:
         except Exception:
             return ""
 
-    # ---------- 状态 / 事件 ----------
+    # --- 状态 / 事件 ---
     @property
     def state_path(self):
         return os.path.join(self.home, "state.json")
@@ -596,7 +596,7 @@ class LifeEngine:
         """已经记录过的 (日期, 片段)，补算时用来去重"""
         return {(e.get("date"), e.get("slot")) for e in self.events(days=MAX_BACKFILL_DAYS + 2)}
 
-    # ---------- 当天的对话（写日记的素材） ----------
+    # --- 当天的对话（写日记的素材） ---
     def _chat_path(self, date_str):
         return os.path.join(self.home, f"chat_{date_str}.jsonl")
 
@@ -632,7 +632,7 @@ class LifeEngine:
             return []
         return out
 
-    # ---------- 调模型 ----------
+    # --- 调模型 ---
     def _llm(self, prompt, max_tokens=500, temperature=0.9):
         if not self.api.get("api_key"):
             return None
@@ -654,7 +654,7 @@ class LifeEngine:
         return ("说话口语化、短句，像个真实的女孩子，不要有作文腔；"
                 "性格活泼、有点小傲娇但也温柔")
 
-    # ---------- 生成一天的片段 ----------
+    # --- 生成一天的片段 ---
     def _day_prompt(self, date_str, slots, done_events):
         w = self.world
         wd = WEEKDAY[datetime.date.fromisoformat(date_str).weekday()]
@@ -771,7 +771,7 @@ class LifeEngine:
         txt = txt.splitlines()[0].strip().lstrip("-*• ").strip()
         return {"date": b, "slot": "这些天", "text": txt, "t": _fmt(slots[-1]["end"])}
 
-    # ---------- 日记 ----------
+    # --- 日记 ---
     def diary_path(self, date_str):
         return os.path.join(self.journal_dir, f"{date_str}.md")
 
@@ -857,7 +857,7 @@ class LifeEngine:
             f.write(f"# {date_str} {wd}\n\n{body}\n")
         return body
 
-    # ---------- 主入口：惰性补算 ----------
+    # --- 主入口：惰性补算 ---
     def _floor_date(self, now):
         """她「开始过日子」的那天。第一次跑就是今天，之后写进 state.json 永久记住。
 
@@ -908,7 +908,7 @@ class LifeEngine:
             out.append(ds)
         return out[:MAX_DIARY_BACKFILL]
 
-    # ---------- 跨进程锁（桌宠 / 其它入口可能同时开着） ----------
+    # --- 跨进程锁（桌宠 / 其它入口可能同时开着） ---
     def _acquire_file_lock(self):
         """抢到返回 True，抢不到（别人正在补）返回 False。
 
@@ -967,13 +967,13 @@ class LifeEngine:
     def _catch_up_locked(self, now):
         res = {"ok": True, "events": 0, "diary": 0, "calls": 0}
 
-        # ---- 0. 第一次跑：记下她"开始过日子"的那天（之后就不再往前追溯）----
+        # --- 0. 第一次跑：记下她"开始过日子"的那天（之后就不再往前追溯） ---
         st = self.state()
         if not st.get("started"):
             st["started"] = now.date().isoformat()
             self._save_state(st)
 
-        # ---- 1. 找出缺哪些片段 ----
+        # --- 1. 找出缺哪些片段 ---
         done = self._done_pairs()
         pending = [s for s in slots_between(self._begin(now), now)
                    if (s["date"], s["slot"]) not in done]
@@ -988,7 +988,7 @@ class LifeEngine:
         if len(pending) > MAX_DETAIL_SLOTS:
             older, recent = pending[:-MAX_DETAIL_SLOTS], pending[-MAX_DETAIL_SLOTS:]
 
-        # ---- 2. 太久没来的那几天：一句概括 ----
+        # --- 2. 太久没来的那几天：一句概括 ---
         if older:
             s = self._gen_summary(older, self.events(days=MAX_BACKFILL_DAYS + 2))
             res["calls"] += 1
@@ -999,7 +999,7 @@ class LifeEngine:
             self._append_events([s])
             res["events"] += 1
 
-        # ---- 3. 最近的部分：按天细写 ----
+        # --- 3. 最近的部分：按天细写 ---
         by_day = {}
         for s in recent:
             by_day.setdefault(s["date"], []).append(s)
@@ -1036,7 +1036,7 @@ class LifeEngine:
             # 记下这个 doing 属于哪个时段 —— 读的时候才知道它是不是"此刻"
             st["doing_slot"] = slot_of(now)[0]
             st["doing_at"] = _fmt(now)
-        # 心情按天取：昨天的情绪不能留到今天。没有当天的就宁可不写，
+        # 心情按天取：前一天的情绪不能留到今天。没有当天的就宁可不写，
         # 别拿隔夜的糊弄（实测凌晨三点还在用白天那句"乱糟糟"）
         if mood:
             st["mood"] = mood
@@ -1051,7 +1051,7 @@ class LifeEngine:
                 n += 1
         return n
 
-    # ---------- 注入给对话的文本 ----------
+    # --- 注入给对话的文本 ---
     def life_block(self, max_events=7):
         if not self.enabled:
             return ""
@@ -1117,7 +1117,7 @@ class LifeEngine:
             body = body[:max_chars].rstrip() + "…"
         return f"【你的日记】你最近一篇日记（{latest}）写的是：\n{body}"
 
-    # ---------- 自知：她知不知道"我会写日记 / 会发朋友圈" ----------
+    # --- 自知：她知不知道"我会写日记 / 会发朋友圈" ---
     def self_aware_block(self):
         """告诉她"你自己会写日记、会发朋友圈"这两件事。
 
@@ -1159,7 +1159,7 @@ class LifeEngine:
         except Exception:
             pass
 
-    # ---------- 维护 ----------
+    # --- 维护 ---
     def reset(self, keep_world=True):
         """让她重新开始（清掉经历和日记，保留世界设定）"""
         for p in (self.events_path, self.state_path):

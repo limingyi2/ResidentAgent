@@ -58,7 +58,7 @@ _VISION_HINTS = ("-vl", "vl-", "vision", "internvl", "minicpm-v", "llava",
 _EMBED_HINTS = ("bge-", "bce-", "gte-", "jina-", "embedding", "rerank",
                 "reranker", "text-embedding")
 
-# 兜底清单（2026-09 整理）。在线拉不到时给 App 用，至少能选。
+# 兜底清单：在线拉不到时给 App 用，至少能选。
 FALLBACK = {
     "chat": [
         "Qwen/Qwen3-8B", "Qwen/Qwen3-14B", "Qwen/Qwen3-32B",

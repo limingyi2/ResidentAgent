@@ -96,10 +96,8 @@ LIFE_RULES = (
 
 
 # 开头的时间标签。上下文里每条历史都带（见 Brain._stamp），模型会照抄这个格式，
-# 所以必须在出口剥掉。日期段允许 1~2 组 —— `_stamp()` 产出的是两组的
-# `[MM-DD HH:MM]`，而这里早期只覆盖了三组的 `[YYYY-MM-DD HH:MM]`，
-# 两组的就一直漏网、直接显示在屏幕上（2026-10-01 用户两次截图反馈）。
-# 两个出口共用这个常量，免得再改一处漏一处。
+# 必须在出口剥掉。日期段允许 1~2 组：`_stamp()` 产出两组的 `[MM-DD HH:MM]`，
+# 只覆盖三组 `[YYYY-MM-DD HH:MM]` 时两组的会漏网。两个出口共用这个常量，免得改一处漏一处。
 _TIME_TAG_RE = re.compile(r"^\[\d{1,4}(?:-\d{1,2}){1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*")
 
 
@@ -165,7 +163,7 @@ class Brain:
         self.mem = mem
         self.life = life                      # LifeEngine（她自己的生活），可为 None
         self.api = api_config or {}
-        self.mode = mode                      # 保持 "api"（历史遗留分支，别处仍会读）
+        self.mode = mode                      # 保持 "api"（别处仍会读这个键名，改名会漏）
         self.max_new_tokens = max_new_tokens
         self.history_turns = history_turns
 

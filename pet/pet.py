@@ -21,7 +21,7 @@ sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "brain"))  # 云端大脑（共享核心）也加进来
 
 
-# ---------- 单实例：同一时间只允许一个桌宠 ----------
+# --- 单实例：同一时间只允许一个桌宠 ---
 # 看门狗拉起 / 开机自启 / 手动双击，任何入口都能再起一个，每个都建一套窗口，
 # 于是桌面叠了十几个。用 Windows 命名互斥量跨进程兜住，第二个实例启动即退出。
 _INSTANCE_MUTEX = None
@@ -80,7 +80,7 @@ if os.path.exists(CFG_PATH):
         pass
 
 
-# ---------- 置顶保活（Windows 原生，见 _TopMostGuard） ----------
+# --- 置顶保活（Windows 原生，见 _TopMostGuard） ---
 # 不能只靠 Qt 的 WindowStaysOnTopHint：点一下别的置顶窗口（悬浮窗 / 桌面歌词 / 输入法
 # 候选框 / 游戏启动器）就会升到置顶带更上面把她盖住，而她自己的 WS_EX_TOPMOST 其实还在，
 # Qt 对此一无所知、也不会主动抢回来。
@@ -160,7 +160,7 @@ class _TopMostGuard(QAbstractNativeEventFilter):
 _TOPMOST_GUARD = None               # 懒建：QApplication 起来之后再挂
 
 
-# ---------- 感知线程的信号桥 ----------
+# --- 感知线程的信号桥 ---
 class ActSignal(QObject):
     """watcher 跑在普通线程里，Qt 的控件只能在主线程动，
     所以用信号把结果传回主线程。"""
@@ -185,7 +185,7 @@ class ProactiveWorker(QThread):
             self.reply.emit("", "出错")
 
 
-# ---------- 推理（后台） ----------
+# --- 推理（后台） ---
 class ChatWorker(QThread):
     reply = pyqtSignal(str, str)
 
@@ -201,7 +201,7 @@ class ChatWorker(QThread):
             self.reply.emit("……我卡壳了，你再说一遍？", "出错")
 
 
-# ---------- 她自己的生活（后台补算） ----------
+# --- 她自己的生活（后台补算） ---
 class LifeWorker(QThread):
     """把「她自己的生活」补算到当前时刻。
 
@@ -239,7 +239,7 @@ class DiaryWorker(QThread):
             self.done.emit(False, "")
 
 
-# ---------- 气泡（独立顶层窗口） ----------
+# --- 气泡（独立顶层窗口） ---
 class Bubble(QWidget):
     """独立窗口的气泡。
 
@@ -295,7 +295,7 @@ class Bubble(QWidget):
         self.raise_()
 
 
-# ---------- 聊天窗（微信风格） ----------
+# --- 聊天窗（微信风格） ---
 DIALOG_W, DIALOG_H = 420, 580
 CARD_W = DIALOG_W - 2                 # 左右各留 1px 画描边
 AREA_W = CARD_W - 12 - 28             # 减去滚动条 + 消息区左右内边距
@@ -688,7 +688,7 @@ class ChatDialog(QDialog):
         self.inp.setFocus()
 
 
-# ---------- 立绘窗口 ----------
+# --- 立绘窗口 ---
 
 WIN_LEVELS = ("top", "bottom")
 WIN_LEVEL_LABEL = {"top": "置顶（在所有窗口上面）",
@@ -782,7 +782,7 @@ def _last_chat_gap_min():
 class PetWindow(QLabel):
     def __init__(self):
         super().__init__()
-        # ---- 窗口层级：两档（置顶开关），用户手动选，她自己不判断 ----
+        # --- 窗口层级：两档（置顶开关），用户手动选，她自己不判断 ---
         #   "top"    压在所有窗口上面（置顶窗口=开）
         #   "bottom" 沉在所有窗口下面（置顶窗口=关，别的软件都能盖住她）
         # sink_on_fullscreen 是"她自己判断全屏 / 游戏并让开"的开关，默认关。
@@ -809,7 +809,7 @@ class PetWindow(QLabel):
         self._talk_on = False
         self.last_activity = ""      # 最近一次感知到的活动（给"主动搭话"当话题）
 
-        # ---- 大脑只在云上：桌宠是纯客户端 ----
+        # --- 大脑只在云上：桌宠是纯客户端 ---
         # 本地兜底大脑已摘掉：两台进程各养一个她只会互相覆盖记忆，而且本地那份记忆跟云上
         # 早早分叉了，聊起来更像"另一个人"。
         self._remote_base = str(api_config.get("brain_remote") or "").strip()
@@ -841,19 +841,19 @@ class PetWindow(QLabel):
         print(f"[角色] 立绘已显示，大脑在 {self._remote_base}"
               "（云端连不上她就说不了话，检查 SSH 隧道）", flush=True)
 
-        # ---- 活动感知（只看窗口标题/进程名，不截屏）----
+        # --- 活动感知（只看窗口标题/进程名，不截屏） ---
         self._setup_watcher()
 
-        # ---- 把她的生活补到当前（后台，不挡启动）----
+        # --- 把她的生活补到当前（后台，不挡启动） ---
         QTimer.singleShot(1500, lambda: self._catch_up_life())
 
-        # ---- 开机问候：启动几秒后她自己先开个口（可在设置里关）----
+        # --- 开机问候：启动几秒后她自己先开个口（可在设置里关） ---
         QTimer.singleShot(5000, self._startup_greet)
 
-        # ---- 置顶保活：等窗口真正显示出来（winId 才有效）再挂 ----
+        # --- 置顶保活：等窗口真正显示出来（winId 才有效）再挂 ---
         QTimer.singleShot(300, self._start_topmost_guard)
 
-    # ---------- 她自己的生活 ----------
+    # --- 她自己的生活 ---
     def _catch_up_life(self, force=False, then=None):
         """后台把她的生活补到当前时刻。节流内的重复调用只是空转。"""
         if getattr(self, "life", None) is None:
@@ -1211,7 +1211,7 @@ class PetWindow(QLabel):
         self.show_bubble("好，刚才聊的都忘掉啦～")
         print("[角色] 聊天记录已清空", flush=True)
 
-    # ---------- 窗口层级：置顶 / 全屏时让位 ----------
+    # --- 窗口层级：置顶 / 全屏时让位 ---
     @staticmethod
     def _flags_for(level):
         """立绘的窗口样式：置顶多一个 StaysOnTop，沉底多一个 StaysOnBottom。"""
@@ -1269,7 +1269,7 @@ class PetWindow(QLabel):
         except Exception:
             pass
 
-    # ---------- 置顶保活（原生钩子 + 定期抢回 z-order） ----------
+    # --- 置顶保活（原生钩子 + 定期抢回 z-order） ---
     def topmost_hwnds(self):
         """当前需要保持"置顶带最上面"的窗口句柄（立绘 + 气泡）。
 
@@ -1382,7 +1382,7 @@ class PetWindow(QLabel):
             print(f"[角色] 退出来了，我回到「{WIN_LEVEL_LABEL[self.win_level]}」", flush=True)
             self._apply_level(self.win_level)
 
-    # ---------- 设置 ----------
+    # --- 设置 ---
     def open_settings(self):
         from settings_dialog import SettingsDialog
         SettingsDialog(self, api_config).exec()
@@ -1411,7 +1411,7 @@ class PetWindow(QLabel):
         if not (self._fs_app and self.sink_on_fullscreen):
             self._apply_level(self.win_level)
 
-        # 本地接口已在 2026-09-29 移除 —— 这里不再有端口要重启
+        # 本地接口已移除 —— 这里不再有端口要重启
         self.show_bubble("设置好啦～")
 
     def _startup_greet(self):
@@ -1491,7 +1491,7 @@ if __name__ == "__main__":
             pass
         sys.exit(0)
 
-    # 她的大脑只在云上（本地兜底大脑已于 2026-09-29 移除）—— 没配地址就别装作能聊。
+    # 她的大脑只在云上（本地兜底大脑已移除）—— 没配地址就别装作能聊。
     # 必须给弹窗：这个脚本是 pythonw 跑的，写在控制台的报错永远看不见。
     if not str(api_config.get("brain_remote") or "").strip():
         try:

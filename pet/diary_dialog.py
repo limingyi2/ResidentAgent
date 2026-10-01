@@ -238,7 +238,7 @@ class DiaryDialog(QDialog):
             " border:0;}")
         return btn
 
-    # ---------- 数据 ----------
+    # --- 数据 ---
     def refresh(self, keep_date=None):
         """重新读盘。keep_date 给了就尽量停在那一篇。"""
         try:
@@ -263,7 +263,7 @@ class DiaryDialog(QDialog):
             self.idx = i
             self._render()
 
-    # ---------- 渲染 ----------
+    # --- 渲染 ---
     def _render_empty(self):
         self.head.setText("")
         self.body.setFont(diary_font(14))
@@ -298,7 +298,7 @@ class DiaryDialog(QDialog):
         bar = self.scroll.verticalScrollBar()
         bar.setValue(0)
 
-    # ---------- 键盘翻页 ----------
+    # --- 键盘翻页 ---
     def keyPressEvent(self, e):
         if e.key() == Qt.Key.Key_Left:
             self.go(-1)
