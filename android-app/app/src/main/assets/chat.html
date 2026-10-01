@@ -9,7 +9,7 @@
 html,body { height:100%; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:#f7f7f7; font-size:15px; color:#191919; overflow:hidden; }
 .page { position:absolute; top:0; left:0; right:0; bottom:50px; display:none; flex-direction:column; background:#f7f7f7; }
 .page.on { display:flex; }
-/* 聊天/朋友圈/设置/资料页隐藏了 tabbar，页面要铺到底，否则输入栏离屏幕底多出 50px */
+/* 这些页隐藏了 tabbar，要铺到底；否则输入栏离屏幕底多出 50px */
 body.notab .page { bottom:0; }
 .topbar { flex:none; height:46px; background:#ededed; display:flex; align-items:center; padding:0 12px; border-bottom:0.5px solid #dcdcdc; position:relative; z-index:5; }
 .topbar .tt { position:absolute; left:0; right:0; text-align:center; font-size:16.5px; font-weight:500; pointer-events:none; }
@@ -391,7 +391,7 @@ body.notab .page { bottom:0; }
 <div id="toast"></div>
 
 <script>
-/* ================= 基础 ================= */
+/* --- 基础 --- */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
 const APP_CODE  = 18;   // 18 = 语音条不再重复显示文字（2026-10-01）；17 = 设置页一键换声音；16 = 语音条 + 今日用量
@@ -413,16 +413,14 @@ function fmtT(t) {
   if (sameDay) return hm;
   return (d.getMonth() + 1) + '-' + d.getDate() + ' ' + hm;
 }
-// 本机当前时刻，格式跟服务端 /api/chat 返回的 t 一致（"YYYY-MM-DD HH:MM"）。
-// 自己发的消息用它打时间 —— /api/chat 只返回她回复的时刻。
+// 本机当前时刻，格式与服务端 /api/chat 的 t 一致（"YYYY-MM-DD HH:MM"）；他的消息用它打时间，接口只返回她的时刻。
 function nowStr() {
   const n = new Date(), p = x => ('0' + x).slice(-2);
   return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate())
     + ' ' + p(n.getHours()) + ':' + p(n.getMinutes());
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
-// 历史里他的消息会被服务端塞进一些"给她的提示"：视觉描述、（发一张图给她看）等。
-// 这些是他让她"看到/知道"的内部标记，不该出现在他自己的气泡里 —— 一律剥掉，留他自己打的字。
+// 他的消息里混着服务端塞给她的内部提示（视觉描述、发图通知等），是给她看的标记，气泡里一律剥掉。
 function cleanMine(s) {
   return String(s == null ? '' : s)
     .replace(/（他发的图：[\s\S]*?）/g, '')
@@ -433,10 +431,8 @@ function cleanMine(s) {
     .trim();
 }
 
-/* ================= 错误记录（App 自己出的错） ================= */
-// 手机上出错是看不见的：没有控制台，只能看到"她不回话"或者按钮点了没反应。
-// 所以这里把每次报错、每次请求失败都存进 localStorage（最多 200 条），
-// 设置页 → 错误日志 里能看、能导成 txt 发过来 —— 不用再猜是哪一步炸的。
+/* --- 错误记录（App 自己出的错） --- */
+// 手机上出错看不见（没有控制台），所以报错与请求失败都存进 localStorage（上限 200 条），设置页可查、可导成 txt。
 const LOGKEY = 'zx_errlog';
 function errLocal(where, e, level) {
   try {
@@ -456,7 +452,7 @@ function errLocal(where, e, level) {
     });
     while (items.length > 200) items.shift();
     localStorage.setItem(LOGKEY, JSON.stringify(items));
-  } catch (_) { /* 记日志这件事自己绝不能再抛错，否则会把正常流程带崩 */ }
+  } catch (_) { /* 记日志本身绝不能再抛错，否则会把正常流程带崩 */ }
 }
 function errLocalList() {
   try { const a = JSON.parse(localStorage.getItem(LOGKEY) || '[]'); a.reverse(); return a; }
@@ -477,7 +473,7 @@ window.fetch = function (u, o) {
   });
 };
 
-/* ================= 页面导航 ================= */
+/* --- 页面导航 --- */
 let curPage = 'list';
 const BACK_MAP = { chat: 'list', moments: 'discover', settings: 'me', profile: 'contacts', diary: 'discover', models: 'settings', logs: 'settings' };
 function openPage(p) {
@@ -521,7 +517,7 @@ function androidBack() {
 window.view = s => { $('viewerImg').src = s; $('viewer').style.display = 'flex'; };
 $('viewer').onclick = () => $('viewer').style.display = 'none';
 
-/* ================= 头像 / 背景 ================= */
+/* --- 头像 / 背景 --- */
 function herAv() { return localStorage.getItem('zx_herav') || 'logo.png'; }
 function renderAvatars() {
   const h = herAv();
@@ -553,7 +549,7 @@ window.__onPickGlobal = function (b64) {
 };
 function cancelImg() { pendingImg = null; $('imgPrev').style.display = 'none'; }
 
-/* ================= 聊天 ================= */
+/* --- 聊天 --- */
 let lastDay = '', lastT = '';
 function renderAv(role, el) {
   if (role === 'user') {
@@ -564,8 +560,7 @@ function renderAv(role, el) {
 function addMsg(role, text, t, myImgB64, imgIsB64) {
   const d = t || '';
   if (d) {
-    // 时间线：跨天、或者距上一条超过 5 分钟，就插一条时间分隔（像微信）。
-    // 以前只按天插，同一小时里连聊几十条，界面上一条时间都看不到。
+    // 跨天、或距上一条超过 5 分钟就插一条时间分隔（像微信）；只按天插的话连聊几十条都看不到时间。
     const day = d.slice(0, 10);
     const cur = new Date(String(d).replace(' ', 'T'));
     const prev = lastT ? new Date(String(lastT).replace(' ', 'T')) : null;
@@ -601,11 +596,7 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
     const shown = cleanMine(raw);
     if (shown) { const tx = document.createElement('div'); tx.textContent = shown; bub.appendChild(tx); }
   } else if (/\[voice[:：][^\]]+\]/.test(raw)) {
-    // 她发的语音条：服务端已经把文字合成为 mp3（voice.py），这里只负责播放。
-    // 2026-10-01 改（用户要求"消息只要语音"）：**不再把标签后面那条文字显示出来**。
-    // 原来会在播放器下面再铺一遍原文，一条消息看着像"语音 + 重复的文字"两截。
-    // 文字仍然照原样存在历史里（标签后面那段没删），只是不渲染 ——
-    // 万一以后想恢复，把 after 那两行加回来就行。
+    // 语音条：文字已由服务端合成 mp3，这里只播放；标签后的原文不再渲染（否则像"语音+重复文字"），历史里仍留着。
     const m = raw.match(/\[voice[:：]([^\]]+)\]/);
     const au = document.createElement('audio');
     au.controls = true;
@@ -645,16 +636,8 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
   if (_ro) { try { _ro.observe(row); } catch (e) {} }
   scrollBottom();
 }
-// 聊天窗吸底：进聊天页/来新消息时贴住最底部；他往上翻历史就停（autoPin=false）。
-//
-// 2026-10-01 再修一次（前一个版本仍会"重开 App 停在旧消息"）：
-//  1) 只靠每张图的 onload 补贴底不够 —— 图片加载失败（onerror 没绑）、
-//     或者列表因其它原因变高，都不会触发补贴。现在交给 ResizeObserver：
-//     只要处于吸底状态，列表高度一变就自动贴回去。
-//  2) 更要命的是"程序自己滚动"被误判成"用户上翻"：innerHTML 清空重绘会把
-//     scrollTop 归零，浏览器随后抛 scroll 事件，旧代码据此把 autoPin 永久
-//     关掉，之后怎么补都贴不回底部。现在程序滚动后 700ms 内忽略 scroll 事件。
-//  3) 图片没有尺寸占位，加载前后高度剧变 → 加载期间用 settlePin() 连续补贴。
+// 聊天窗吸底：贴底直到他自己上翻（autoPin=false）。三个坑：只靠图片 onload 补贴底不够（加载失败、列表因别的原因变高都不触发）→ 改盯 ResizeObserver；
+// 程序滚动（清空重绘使 scrollTop 归零）会抛 scroll 事件被误判成上翻、把 autoPin 永久关掉 → 自己滚完 700ms 内忽略；图片无尺寸占位、加载前后高度剧变 → 加载期间连续补贴。
 let autoPin = true;
 let pinUntil = 0;
 let _newNodes = [];                 // addMsg 这次创建出来的 DOM（增量渲染要用）
@@ -669,8 +652,7 @@ function scrollBottom(force) {
 }
 let pinTimer = null;
 function settlePin() {
-  // 图片是异步加载的，加载完列表才长高 —— 加载期间每隔 300ms 补贴一次底，
-  // 最多补 3 秒；用户中途自己上翻（autoPin=false）就立刻停手。
+  // 图片异步加载、加载完列表才长高：期间每 300ms 补一次底、最多 3 秒，他中途上翻就停手。
   clearInterval(pinTimer);
   let n = 0;
   pinTimer = setInterval(() => {
@@ -684,9 +666,7 @@ $('list').addEventListener('scroll', () => {
   const b = $('list');
   autoPin = b.scrollHeight - b.scrollTop - b.clientHeight < 120;
 });
-// 注意：不能直接 observe(#list) —— #list 是滚动容器，它自己的尺寸不变，
-// 变的是里面的内容（scrollHeight），ResizeObserver 不会报。要观察每一条消息行：
-// 行里的图片一加载完、行变高，就会触发，然后自动贴回底部。
+// 不能直接 observe(#list)：它是滚动容器、自身尺寸不变（变的是内容高度）不会触发，要观察每一条消息行。
 let _ro = null;
 try {
   if (window.ResizeObserver) {
@@ -710,16 +690,13 @@ function addTracked(it) {
   return { key: keyOf(it), els: _newNodes.slice() };
 }
 function renderHistory(items) {
-  // 全量重绘（只在增量算不出来时才走这条）：会清空 DOM、滚动位置必丢，
-  // 所以调用方之后必须 force 贴底 —— 2026-10-01 之前就是每次轮询都走这条，
-  // 才出现"重开 App 停在旧消息"。
+  // 全量重绘（只在增量算不出来时走）：清空 DOM、滚动位置必丢，调用方之后必须 force 贴底。
   lastDay = ''; lastT = ''; $('list').innerHTML = '';
   msgNodes = [];
   items.forEach(it => msgNodes.push(addTracked(it)));
 }
 function updateHistory(items) {
-  // 增量：只删掉滑出窗口（limit=300 的窗口会往前推）的旧节点、只追加新消息。
-  // 不动已有 DOM，就不会丢滚动位置，也不会有整列表重绘的闪烁。
+  // 增量：只删滑出窗口的旧节点、只追加新消息，不动已有 DOM 就不会丢滚动位置、也不会闪。
   if (!msgNodes.length) { renderHistory(items); return; }
   const oldK = msgNodes.map(m => m.key);
   const newK = items.map(keyOf);
@@ -799,7 +776,7 @@ $('stkBtn').onclick = () => {
   if (p.style.display === 'flex') loadStickers();
 };
 
-/* ================= 会话列表 ================= */
+/* --- 会话列表 --- */
 function renderSess(items) {
   const last = items && items.length ? items[items.length - 1] : null;
   const prev = last ? (last.img && last.role === 'user' ? '[图片]' : String(last.text || '')) : '还没有聊过天，去说第一句吧';
@@ -827,7 +804,7 @@ function openChat() {
   openPage('chat');
 }
 
-/* ================= 表情包 ================= */
+/* --- 表情包 --- */
 let cloudStk = [];
 function customStk() { try { return JSON.parse(localStorage.getItem('zx_mystk') || '[]'); } catch (e) { return []; } }
 function addCustomSticker(b64) {
@@ -878,16 +855,14 @@ function renderStickers() {
   });
 }
 function sendSticker(b64) {
-  // 表情面板点一下就发出去，之前没有确认——误触一下就会以"他"的名义
-  // 发出一张他自己都不知道的表情包（2026-09-22 用户遇到的"我没发过这张"）。
-  // 加一道确认，成本极低，能拦住绝大多数误触。
+  // 点一下就发会误触，结果以"他"的名义发出他自己都不知道的表情包，加一道确认拦住。
   if (!confirm('把这张表情包发给她？')) return;
   $('stkPanel').style.display = 'none';
   addMsg('user', '', nowStr(), b64, true);
   sendText('', b64);
 }
 
-/* ================= 朋友圈 ================= */
+/* --- 朋友圈 --- */
 async function loadMoments() {
   $('momFoot').textContent = '加载中…';
   try {
@@ -962,7 +937,7 @@ async function commentMoment(id, text) {
   } catch (e) { tip('操作失败'); }
 }
 
-/* ================= 人设切换 ================= */
+/* --- 人设切换 --- */
 let personaKeys = {};
 async function loadStats(manual) {
   try {
@@ -1014,10 +989,8 @@ async function applyPersona(key, label) {
   } catch (e) { tip('切换失败，检查网络'); }
 }
 
-/* ================= 她的声音 ================= */
-// 2026-10-01 加。起因：换一次音色要 ssh 上云改配置再重启，用户问"能不能在 App 里快速换"。
-// 数据来自 /api/voices（清单是云端代码里的死数据，不联网，所以设置页永远打得开）。
-// 「试听」走 /api/voice/preview —— 云端用**临时配置**合成，不会顺手把她换掉。
+/* --- 她的声音 --- */
+// 清单来自 /api/voices（云端死数据、不联网，设置页永远打得开）；「试听」走 /api/voice/preview，用临时配置合成，不会顺手把她换掉。
 let voiceItems = [], vAudio = null;
 async function loadVoices() {
   const cur = $('voiceCur'), box = $('voiceList');
@@ -1088,7 +1061,7 @@ async function applyVoice(key, label) {
   } catch (e) { tip('切换失败，检查网络'); }
 }
 
-/* ================= 日记 ================= */
+/* --- 日记 --- */
 let diaryDays = [];
 async function loadDiaryList() {
   $('dFoot').textContent = '加载中…';
@@ -1124,9 +1097,8 @@ async function openDiary(day) {
 }
 function diaryBack() { $('dRead').style.display = 'none'; $('dList').style.display = 'block'; }
 
-/* ================= 模型 ================= */
-// 她说话用的模型原来写死在云上的配置里，手机上改不了。这里做成四个下拉：
-// 对话 / 看图 / 生图 / 语音 —— 语音那个还没做，先置灰占位。
+/* --- 模型 --- */
+// 模型原本写死在云端配置、手机上改不了，这里做成四个下拉；语音那栏还没做，先置灰占位。
 let mProv = 'siliconflow', mGroups = {}, mCur = {}, mProvs = [];
 
 function openModels() { openPage('models'); loadModelCfg(false); }
@@ -1225,7 +1197,7 @@ async function saveModels() {
   } catch (e) { out.textContent = '保存失败：' + ((e && e.message) || e); }
 }
 
-/* ================= 错误日志 ================= */
+/* --- 错误日志 --- */
 let logSrc = 'server';
 
 function openLogs() { openPage('logs'); loadLogs(); }
@@ -1336,7 +1308,7 @@ async function clearLog() {
   } catch (e) { tip('清空失败：' + ((e && e.message) || e)); }
 }
 
-/* ================= 设置 / 更新 ================= */
+/* --- 设置 / 更新 --- */
 function openSettings() { $('baseIn').value = BASE; $('tokenIn').value = TOKEN; $('connResult').textContent = ''; openPage('settings'); }
 function openProfile() { renderAvatars(); openPage('profile'); }
 function openStk() { switchTab('wx'); openPage('chat'); $('stkPanel').style.display = 'flex'; loadStickers(); }
@@ -1379,7 +1351,7 @@ async function checkUpdate(manual) {
   } catch (e) { if (manual) tip('检查失败，稍后再试'); }
 }
 
-/* ================= 启动 ================= */
+/* --- 启动 --- */
 (async function init() {
   renderAvatars(); applyBg();
   if (!localStorage.getItem('zx_splashed')) {

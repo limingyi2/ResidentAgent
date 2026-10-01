@@ -6,10 +6,8 @@
 刻意做成「纸质」的样子：米黄底、楷体、居中窄栏，跟聊天窗的微信风区分开 ——
 这是她自己写给自己看的东西，不该长得像聊天记录。
 
-数据全部来自 life_engine.LifeEngine：
-    list_diaries()   有哪些天写了
-    read_diary(ds)   读某天正文
-这个模块不写盘，只读。
+数据全部来自 life_engine.LifeEngine：list_diaries() 看有哪些天写了、
+read_diary(ds) 读某天正文。这个模块不写盘，只读。
 """
 import datetime
 import html
@@ -65,9 +63,8 @@ def pretty_date(ds):
 def diary_html(body, ink=INK):
     """把日记正文排成分段富文本：段间留白、首行缩进两字、行距放宽。
 
-    为什么要这一步：日记正文是一整段连续文字（模型爱一口气写完，
-    老日记也是这样），直接贴进 QLabel 就是一大坨，读着累。
-    这里按空行切段 —— 切不出多段就退化成按单换行切，尽量排出「几段话」的样子。
+    日记正文是一整段连续文字（模型爱一口气写完），直接贴进 QLabel 就是一大坨，读着累。
+    这里按空行切段 —— 切不出多段就退化成按单换行切。
     """
     text = (body or "").strip()
     if not text:

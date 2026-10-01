@@ -1,22 +1,16 @@
 # -*- coding: utf-8 -*-
 """角色 · 云端大脑服务。
 
-它对外提供什么
---------------
-1. **远程大脑 API**（start_remote_api，端口 8788）：手机 App 与 Windows 桌宠都连它
+对外提供两样：
+1. 远程大脑 API（start_remote_api，端口 8788）：手机 App 与 Windows 桌宠都连它
    聊天。记忆 / 人设 / 上下文只有云上这一份，天然同步。
-2. **生活与自主行为**：生活补算（过日子 + 写日记）、朋友圈、主动搭话，都跑在这个
-   进程里 —— 所以这个进程不能随便退。
+2. 生活与自主行为：生活补算、写日记、朋友圈、主动搭话都跑在这个进程里，
+   所以它不能随便退。
 
-关于"为什么只有一个大脑"
---------------------
-她的记忆库（data/memory/）是"整文件重写"式的存档：如果同时存在两个装配了 Brain
-的进程，两边各持一份内存副本，谁后保存谁就把对方刚记下的东西覆盖掉 —— 记忆会
-悄悄丢，而且很难发现。文件末尾的单实例守卫就是为了防这个，不是可选项。
+只能有一个大脑：记忆库存档是整文件重写式的，两个进程各持一份内存副本会互相
+覆盖，记忆会悄悄丢。文件末尾的单实例守卫就是防这个，不是可选项。
 
-用法
-----
-    python server.py            # 直接跑（Ctrl+C 退出）
+用法：python server.py
 """
 import os
 import re
@@ -35,10 +29,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-# 云机上由计划任务（SYSTEM + 重定向到文件）启动时，stdout 编码是 GBK：
-# 她回复里只要带 emoji，print 就会抛 UnicodeEncodeError，把整个处理流程
-# 打断在"发送"之前 —— 表现为"她明明生成了回复但对方收不到"。这里强制
-# UTF-8 + errors=replace，任何字符都不会再阻断流程。
+# 计划任务启动时 stdout 是 GBK：回复里带 emoji，print 就抛 UnicodeEncodeError，
+# 整个流程断在"发送"之前（表现为"生成了回复但对方收不到"）。强制 UTF-8 + replace
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -69,8 +61,8 @@ def load_config():
 
 api_config = load_config()
 
-# 模型中枢 + 错误日志（2026-09-28 加）：App 要在手机上换模型、导出报错日志，
-# 都走这两个模块。异常钩子装上之后，线程里静默死掉的异常也会留下一行记录。
+# 模型中枢 + 错误日志：App 在手机上换模型、导出日志都走这两个模块。
+# 异常钩子装上后，线程里静默死掉的异常也会留下记录
 import model_hub
 import errlog
 try:
@@ -78,26 +70,15 @@ try:
 except Exception:
     pass
 
-# 访问码：新配置放 brain_token；2026-09-29 之前的老配置放在 mobile.token 里，
-# 继续认（迁移期兜底）。云端 config 是独立的一份，不跟着本地改，
-# 所以这个兜底必须留着 —— 否则 tok 变成 ""，_check() 会直接放行，等于撤掉鉴权。
+# 访问码优先读 brain_token，旧配置的 mobile.token 继续认。这个兜底不能删：
+# 读不到会变成空串，_check() 直接放行，等于撤掉鉴权
 MOB_CFG = api_config.get("mobile") or {}
 if not isinstance(MOB_CFG, dict):
     MOB_CFG = {}
 BRAIN_TOKEN = str(api_config.get("brain_token") or MOB_CFG.get("token") or "")
 
-# 视觉/素材库要用的 API 配置（vision.describe_bytes 的第二参）
-# 坑（2026-09-28 修）：这里以前只拷了三个键，没拷 vision —— 结果 vision.py
-# 拿不到 vision.model，一直在用代码里的默认 8B 模型，config 里配的 30B 从来
-# 没生效过。改模型时"看图模型"看着改了其实没变，就是漏了这一行。
-#
-# 坑（2026-10-01 修，同一个坑的第二次）：加"语音"键时才发现的 ——
-# 这份拷贝**一直没有 voice**，而 resolve_voice_tag() 把 API_CFG 传给了
-# voice.synth()。synth 读不到 cfg["voice"] 就整套走默认值，所以云端
-# config.json 里 voice 段写什么都**从来没生效过**（一直碰巧和默认的 diana
-# 一致，所以没人发现）。App 一键换音色必须先把这一行补上，
-# 否则换了声音她还是用旧的 —— 跟 2026-09-22 人设切换踩的是一模一样的坑。
-# 以后往 config 加新的功能段，**记得同步这里**，别再漏第三个。
+# 白名单式浅拷贝：这里漏掉哪个键，对应模块就读到空配置、改了也不生效
+# （vision 与 voice 各栽过一次）。往 config 加新功能段时记得同步这里
 API_CFG = {k: api_config[k] for k in
            ("api_base", "api_key", "model", "vision", "voice")
            if k in api_config}
@@ -136,11 +117,9 @@ def _trace_path():
 def _trace_write(rec):
     """每轮对话落一行 trace。
 
-    为什么要它（2026-10-01 加）：此前她答得不对，只能靠人 SSH 上去翻聊天存档猜。
-    这行记录回答的是"这轮是怎么产生出来的"——命中了哪几条记忆（含相似度）、
-    注入了哪些块各多少字、约定账本有没有带上、去重/静默闸门有没有拦、用了哪个
-    模型、延迟多少、token 花了多少、是不是走了欠费兜底。
-    **只记结构化的中间数据，不记模型内心活动**（那东西本来也没有）。
+    记的是"这轮是怎么产生出来的"：命中了哪几条记忆（含相似度）、注入了哪些块各多少
+    字、约定账本有没有带上、去重与静默闸门拦没拦、用了哪个模型、延迟、token、
+    是不是走了兜底。**只记结构化的中间数据**，不记模型内心活动。
     写文件失败一律静默：观测手段不能反过来把聊天搞挂。
     """
     try:
@@ -205,10 +184,9 @@ def _stats_today():
 def resolve_voice_tag(text, api_config):
     """把回复里的 [voice] 标记变成真语音条。
 
-    她只在想用声音说的时候加这个标记（规则写在 persona_store 的说话规则里）。
-    命中后：把整段文字合成为 mp3，替换成 `[voice:文件名]`，App 那边渲染成可播放的语音条。
-    合成失败就把标记悄悄去掉、正文照发 —— 语音是锦上添花，不能反过来害消息发不出去。
-    模型与音色名见 voice.describe()（当前 CosyVoice2-0.5B : diana，2026-10-01 定）。
+    她只在想用声音说的时候加这个标记。命中后把整段文字合成为 mp3，替换成
+    `[voice:文件名]`，App 渲染成可播放的语音条。合成失败就把标记悄悄去掉、正文照发
+    —— 语音是锦上添花，不能反过来害消息发不出去。
     """
     raw = (text or "")
     if "[voice]" not in raw and "[语音]" not in raw:
@@ -229,8 +207,8 @@ def resolve_voice_tag(text, api_config):
 def resolve_gen_tags(text, look=""):
     """把回复里单独成行的 [gen:描述] 真的生成一张图，替换成 [img:文件名]。
 
-    look 是她的外貌描述（人设 appearance 字段），拼在提示词最前面保证
-    自拍长相稳定。生成失败就把标签整行删掉——绝不能把标签原文发出去。
+    look 是她的外貌描述（人设 appearance），拼在提示词最前面保证自拍长相稳定。
+    生成失败就把标签整行删掉 —— 绝不能把标签原文发出去。
     """
     def _sub(m):
         prompt = m.group(1).strip()
@@ -241,37 +219,21 @@ def resolve_gen_tags(text, look=""):
     return GEN_TAG_RE.sub(_sub, (text or ""))
 
 
-# ---------------------------------------------------------------- 自拍
-# 2026-09-21 用户反馈：让她发自拍，有时她只在正文里用第三人称描述画面
-# （“她坐在窗边……”）却不真发图；而且图 AI 味重（塑料假脸、手指崩）。
-# 根因两条：
-#   1) 老的人设规则（persona_store）明写“描述用第三人称”，模型就照字面
-#      把场景描写当“话”说了；出不出图全看模型心情，不稳定。
-#   2) 生图从不带 negative_prompt，全靠模型猜，瑕疵没人压。
-# 改法：认出“他想要她本人的照片”就**不问模型**，直接照她此刻的时间+地点
-# 现场生成一张，正文用固定短句（保证第一人称、没有 AI 腔）。
-# 2026-09-22 用户要求：「把之前风格的提示词都忘掉，只要记得自拍是第一人称之类的就可以了」。
-# 所以负面词只留**画质 / 畸形**这类硬问题，不再堆风格标签
-# （过度美颜 / 塑料假脸 / 蜡像感 / 3D渲染 / 浓妆 这些会把模型拽离参考图 —— 与"保真优先"冲突）。
+# --- 自拍 ---
+# 认出"他想要她本人的照片"就直接生成、不问模型：让她自己决定的话，她常常只在
+# 正文里用第三人称描述画面却不真发图。正文用固定短句，保证第一人称、没有 AI 腔。
+# 负面词只留画质 / 畸形这类硬问题，不堆风格标签（风格词会把模型拽离参考图）
 GEN_NEGATIVE = ("畸形手指，多余手指，多肢体，融合的手指，扭曲五官，不对称眼睛，"
                 "模糊，低分辨率，水印，文字，签名")
 
-# 明确指向“她本人”的说法；命中就直出图。
-# 2026-09-22 补：刚给过自拍之后，"再来一张 / 再拍一张 / 换一张"这类省略说法
-# 也是要（新）自拍 —— 之前没识别到，模型会翻一张旧图发出来（实测踩过）。
-# 2026-09-29 修「敏感肌」：这张表以前有 "看看你"（还有 "看看你现在的"），
-#   但下面是**子串**匹配 —— "看看你写的日记" 里就含 "看看你"，
-#   于是"要日记"被当成"要自拍"，她直接回一句"拍了张，凑合看吧"（_SELFIE_CAPS
-#   里的固定句）再甩一张图出来。用户实测截图确认。
-#   现在表里只留"你本人"指向明确的说法；"看看你"这种半截话改由
-#   _looks_like_selfie 末尾用整句匹配判断（整句就是"看看你"才算数）。
+# 明确指向"她本人"的说法，命中就直出图；"再来一张 / 换一张"这类省略说法也算。
+# 只用子串匹配会误伤："看看你写的日记"里含"看看你"，要日记被当成要自拍。
+# 所以这张表只留指向明确的说法，半截话交给 _looks_like_selfie 末尾按整句判断
 _SELFIE_STRONG = ("自拍", "看你的样子", "你现在的样子",
                   "你现在啥样", "你长什么样", "你长啥样", "你的照片", "你的近照",
                   "你的样子", "你的自拍", "给我看看你", "让我看看你",
                   "再来一张", "再拍一张", "再拍个", "换一张", "多拍几张")
-# 说的是“她那边的东西/他在给她看”，不是要她本人 —— 命中就别当自拍。
-# 2026-09-29 扩表：只要句子里在说“要某个东西”，就不该出她的照片。
-#   要东西 ≠ 要人。"看看你写的日记" 能挡住，靠的就是下面这两组词 + 正则。
+# 说的是"她那边的东西"或"他在给她看"，不是要她本人 —— 命中就别当自拍
 _SELFIE_MISS = ("手边", "窗外的", "风景", "你那边的", "什么东西", "桌子",
                 "书桌", "房间", "宿舍的样子", "给你看", "给你发", "我给你",
                 "你看这张", "给你瞅",
@@ -280,10 +242,9 @@ _SELFIE_MISS = ("手边", "窗外的", "风景", "你那边的", "什么东西",
                 "课本", "教材", "论文", "代码", "文档", "文件夹", "资料",
                 "成绩单", "计划", "日程", "壁纸", "桌面")
 
-# 2026-09-22 曾按用户要求做过"他要看她穿睡衣/泳装就照点名换装"。
-# 2026-09-29 用户明确改方向：**不要恋爱框架，也不要她有"按需服务"的感觉**。
-# 这条功能整个停用 —— 她穿什么只跟她在哪、几点、在干什么有关，不跟对方点名有关。
-# 代码保留（`_OUTFIT_KEYS` 只作记录），要恢复就把下面两处判断放回来。
+# 按需换装（他要看睡衣 / 泳装就照点名换）已停用：不要恋爱框架，也不该有
+# "按需服务"的感觉。她穿什么只跟时间、地点、在干什么有关。代码留着，
+# 要恢复就把下面两处判断放回来
 _OUTFIT_KEYS = ("睡衣", "泳装", "泳衣", "比基尼")
 _OUTFIT_OVERRIDE_ENABLED = False
 
@@ -304,9 +265,8 @@ def _outfit_override(text):
     return None
 
 
-# “要东西”的正则兜底：紧挨着“你”出现的这些词，一律是要东西、不是要人。
-# 为什么不只靠 _SELFIE_MISS 列表：换种说法就漏（"你那篇日记""你的实验报告"），
-# 正则允许中间夹两三个字（"你**写的**日记""你**昨天发的**朋友圈"），耐用得多。
+# "要东西"的正则兜底：紧挨着"你"出现的这些词一律是要东西、不是要人。
+# 列表挡不住换种说法（"你那篇日记"），正则允许中间夹两三个字，耐用得多
 _SELFIE_THING_RE = re.compile(
     r"你[^，。？！,?!]{0,4}?"
     r"(日记|笔记|报告|作业|记录|截图|相册|歌单|课表|论文|代码|文档|"
@@ -314,15 +274,12 @@ _SELFIE_THING_RE = re.compile(
 
 
 def _looks_like_selfie(text):
-    """他是不是在要“她本人”的照片。
+    """他是不是在要"她本人"的照片。
 
-    2026-09-29 「敏感肌」修复，判断顺序改成四道闸门（从严到宽）：
-      1) 要东西 → 直接否   （"看看你写的日记""你那个作业发我看看"）
-      2) 明确指向她本人 → 是（"发自拍""让我看看你""你的近照"）
-      3) 整句就是"看看你/看你" → 是（以前靠子串，现在只看整句）
-      4) 短的省略说法（"再拍一张""多来两张"）→ 是
-    以前 3、4 混在一起又没有长度限制，导致凡是句子带个"张"字又说"来/换"的
-    都能触发拍照，这是"敏感肌"的另一半原因。
+    判断顺序是四道闸门（从严到宽）：
+    1) 要东西 → 直接否            2) 明确指向她本人 → 是
+    3) 整句就是"看看你" → 是      4) 短的省略说法（"再拍一张"）→ 是
+    3 和 4 必须分开且限制长度，否则长句里捎带一个"张"字都能触发拍照。
     """
     t = (text or "").strip()
     if not t:
@@ -335,22 +292,19 @@ def _looks_like_selfie(text):
     # 闸门 2：明确指向她本人
     if any(h in t for h in _SELFIE_STRONG):
         return True
-    # 点名要睡衣/泳装这类照片 —— 2026-09-29 去恋爱框架时已停用：
-    # 不再因为对方点名就当成"要她本人的照片"去直出图。
+    # 点名要睡衣 / 泳装这类照片已停用：不再因为对方点名就直接出图
     if _OUTFIT_OVERRIDE_ENABLED and any(k in t for k in _OUTFIT_KEYS):
         return True
     # “发/拍/来 + 照片/图 + 你”这类（“你能发张照片吗”）
     if "你" in t and ("照片" in t or "图" in t) and any(
             v in t for v in ("发", "拍", "来", "看")):
         return True
-    # 闸门 3：整句就是要看她本人（"看看你""看你""看看你吧"）。
-    # 以前 "看看你" 是 _SELFIE_STRONG 里的子串，任何含它的长句都会误触发；
-    # 现在要求整句去掉语气词之后正好是这个意思 —— "看看你写的日记" 过不了这关。
+    # 闸门 3：整句就是要看她本人。要求去掉语气词后正好是这个意思，
+    # 否则"看看你写的日记"也会过关
     if re.fullmatch(r"[给我让我]{0,2}看看?你[吧呗呀啊嘛哦哈啦咧～~!！。. ]{0,3}",
                     t):
         return True
-    # 闸门 4：省略说法（"再多来两张看看""换一张"）。必须够短 ——
-    # 长句里捎带一个"张"字（"我来了，这张图给你看"）不算要自拍。
+    # 闸门 4：省略说法（"再多来两张"）。必须够短，长句里捎带"张"字不算
     if len(t) <= 8 and "张" in t and any(
             v in t for v in ("再", "多", "换", "拍", "来")):
         return True
@@ -376,10 +330,8 @@ def _hour_seg(h):
     return "深夜"
 
 
-# ---------------------------------------------------------------- 她的衣柜
-# 2026-09-22 用户说"衣服也不用老是穿的那些" —— 之前只会在卫衣 / 针织衫 / 睡衣
-# 里打转，出几次图就腻了。按**场合**分池：在家（宿舍/床/阳台）穿居家，操场穿运动，
-# 其余（上课/食堂/图书馆/后街）穿外穿；池子给足花样，再偶尔加个配饰。
+# --- 她的衣柜 ---
+# 按场合分池：在家穿居家、操场穿运动、其余穿外穿；池子给足花样，再偶尔加个配饰
 _WEAR_HOME = ["松垮的棉质睡衣", "浅粉色纯棉长袖睡衣套装", "白色纯棉家居套装",
               "淡蓝色格子睡衣", "宽松的灰色卫衣搭短裤", "浅黄色带小图案的家居服",
               "奶白色宽松长袖家居裙", "米色毛绒家居服"]
@@ -409,14 +361,13 @@ def _wear_for(place):
 
 
 def _selfie_prompt(wear_override=None):
-    """照她此刻的时间 + 课表/日常，拼一句"自拍"画面描述。返回 (画面, 地点)。
+    """照她此刻的时间 + 课表 / 日常，拼一句"自拍"画面描述。返回 (画面, 地点)。
 
-    每次都不一样：地点来自 world.json 这一刻的课 / 作息时段（没课再随机挑个
-    落脚点），光线来自当前时段，姿势表情从池子里随机 —— 连着要两张也不重样。
+    地点来自这一刻的课 / 作息时段（没课再随机挑个落脚点），姿势表情从池子里随机 ——
+    连着要两张也不重样。**不拼入外貌**：长相交给参考图，文字里一描述长相，
+    模型就照文字自己造一张脸，参考图等于白喂。
 
-    2026-09-22 起**不再拼入人设外貌**：长相交给参考图（`_cloud_gen_selfie`），
-    文字里一描述长相，模型就照文字自己造一张脸，反而把参考图顶掉。
-    wear_override：他点名想看她穿什么（睡衣/泳装），给了就盖掉按时段的随机衣柜。
+    wear_override：他点名想看她穿什么，给了就盖掉按时段的随机衣柜。
     """
     import datetime
     now = datetime.datetime.now()
@@ -438,8 +389,8 @@ def _selfie_prompt(wear_override=None):
                     break
             except Exception:
                 continue
-        # 只挑"在哪儿 + 在干嘛"，**穿什么另外按地点挑**（见 _wear_for）——
-        # 这样同一时段多拍几张，地点不变衣服也会换（2026-09-22 用户要求别老穿那几件）
+        # 只挑"在哪儿 + 在干嘛"；穿什么另外按地点挑（见 _wear_for），
+        # 这样同一时段多拍几张，地点不变衣服也会换
         if hit:
             opts = [(str(hit[2]), "在上" + str(hit[1]))]
         elif hm < 7 * 60 + 20:
@@ -493,9 +444,8 @@ def _selfie_prompt(wear_override=None):
                           "有点没睡醒的样子，眯着眼", "托着腮看镜头",
                           "抿嘴笑，眼神有点躲", "伸手比了个剪刀手",
                           "撩了一下耳边的碎发看镜头", "低头在看手机，被叫了一声才抬头"])
-    # 2026-09-22：**只留画面本身**（在哪、在干嘛、穿什么、什么姿势、什么光），
-    # 风格词（手机随手拍 / 胶片质感 / 浅景深 / 皮肤纹理…）全部去掉 ——
-    # 用户要求"把之前风格的提示词都忘掉"，堆风格只会把参考图的效果冲淡。
+    # 只留画面本身（在哪、在干嘛、穿什么、什么姿势、什么光）。
+    # 风格词（胶片质感 / 浅景深 / 手机随手拍…）全部去掉，堆风格只会冲淡参考图的效果
     scene = "%s，%s，穿着%s，%s，%s" % (place, doing, wear, pose, light)
     return scene, place
 
@@ -538,9 +488,8 @@ _LOCAL = {"brain": None, "lock": threading.Lock()}
 def build_local_brain(verbose=True):
     """按和桌宠完全一样的方式，在本进程里装配一个 Brain。
 
-    只在 `--standalone` 时用（部署到云服务器：那里没有桌面，也开不了桌宠）。
-    本机的默认模式不调它 —— 两台进程各养一个"她"会互相覆盖记忆，
-    所以同一时间只允许一个进程养她（见文件末尾的单实例守卫）。
+    只在 --standalone 时用（云端没有桌面，开不了桌宠）。两台进程各养一个"她"
+    会互相覆盖记忆，所以同一时间只允许一个进程养她。
     """
     from memory_store_v2 import get_default_store
     from brain import Brain
@@ -593,10 +542,7 @@ def ask_with_retry(text, img_b64=None):
     img_b64：这一轮带的图片（base64），交给视觉模型让她"看见"。
     返回 (她的话, 模式标签, 错误信息) —— 不抛异常，调用方好写。
 
-    2026-09-29：删掉了"把消息转给本机桌宠"那条路。
-    桌宠已经变成纯客户端（本地不再有任何 HTTP 接口，mobile_server.py 已摘掉），
-    那条路只剩死代码。现在 server.py **只有一种形态：本进程自带大脑** ——
-    云服务器上如此，单机跑也如此（run_server 里 base 恒为 None）。
+    server.py 只有一种形态：本进程自带大脑，不再转发给桌宠。
     """
     # 她就在本进程里，直接问，不走网络
     if _LOCAL["brain"] is not None:
@@ -675,10 +621,9 @@ _SOFT_END = "，、,；;：: "
 def split_text(text, limit=MAX_CHARS):
     """把长回复拆成几条，每条不超过 limit。
 
-    为什么不用"先按标点切再合并"：那样处理"一大段没有句号的话"会切出超长段。
-    这里每次只在**前 limit 个字符里**找断点，找不到满意的就硬断 —— 长度有保证。
-
-    断点优先级：句末标点 > 逗号/分号/空格 > 硬断。
+    不用"先按标点切再合并"：一大段没有句号的话会切出超长段。这里每次只在前 limit
+    个字符里找断点，找不到就硬断 —— 长度有保证。
+    优先级：句末标点 > 逗号 / 分号 / 空格 > 硬断。
     """
     text = (text or "").strip()
     if not text:
@@ -718,8 +663,8 @@ def split_text(text, limit=MAX_CHARS):
 def split_messages(text, limit=MAX_CHARS):
     """把回复拆成"像真人连发的几条短消息"。
 
-    她现在被要求自己用换行分条（想说什么就一行一条）；这里尊重她的
-    分条，只在单行仍超长时才用 split_text 兜底硬拆。
+    她已经被要求自己用换行分条，这里尊重她的分条，只在单行仍超长时才用 split_text
+    兜底硬拆。
     """
     lines = [ln.strip() for ln in (text or "").replace("\r", "").split("\n")]
     lines = [ln for ln in lines if ln]
@@ -783,10 +728,8 @@ PROACTIVE_RULES = """先看清楚现在几点、再看看要不要主动找他�
 
 
 # ---------- 主动搭话：配置 / 静默时段 / 每日限额 ----------
-# 2026-09-29：以前 _proactive_loop 里是写死的 time.sleep(2400)，config.json 的
-# proactive 段（enabled / max_per_day / interval_sec / quiet_start / quiet_end）
-# **一个都没读** —— 用户明明设了静默时段，照样凌晨 4 点起被连发消息（实测
-# 04:17~10:58 每 40 分钟一条，共 8 条）。下面这几个函数就是把它接上。
+# interval、静默时段、每日上限都必须从 config 的 proactive 段读 ——
+# 写死的话用户就算设了静默，照样凌晨被连发消息
 
 def _proactive_conf():
     """读 config.json 里的 proactive 段。读不到就返回空 dict（走代码默认值）。"""
@@ -807,9 +750,8 @@ def _proactive_conf():
 def _parse_hhmm(s):
     """'23:00' / '7:30' / '24:00' → 当天第几分钟；不合法返回 None。
 
-    24:00 合法（=1440，用来收一天的尾巴）；24:01 这类不合法 ——
-    用户原来填的 quiet_start=24:00 / quiet_end=24:01 就是后者，
-    解析不出来等于没设静默（这正是旧代码"照发不误"的另一个放行口）。
+    24:00 合法（=1440，用来收一天的尾巴），24:01 这类不合法。解析不出来等于没设
+    静默，会照发不误。
     """
     m = re.match(r"^(\d{1,2}):(\d{2})$", str(s or "").strip())
     if not m:
@@ -823,9 +765,8 @@ def _parse_hhmm(s):
 def _in_quiet(start, end, cur=None):
     """现在是否处于静默时段（这期间不主动搭话）。支持跨零点，如 23:00~07:00。
 
-    cur 传"当天第几分钟"可脱离真实时间测试（不传就取当前时刻）。
-    起止任一解析不出来、或两者相等，一律当"没设静默"（返回 False）——
-    与其猜错把她整天闷住，不如照常说话，用户改配置即可。
+    cur 传"当天第几分钟"可脱离真实时间测试。起止任一解析不出来、或两者相等，一律
+    当"没设静默"—— 与其猜错把她整天闷住，不如照常说话，用户改配置即可。
     """
     a, c = _parse_hhmm(start), _parse_hhmm(end)
     if a is None or c is None or a == c:
@@ -906,14 +847,10 @@ def _proactive_note_user():
 
 
 def _proactive_interval_multiplier():
-    """按最近主动消息的"被回应率"给间隔乘一个系数（2026-10-01 加）。
+    """按最近主动消息的"被回应率"给间隔乘一个系数。
 
-    以前是死板的固定间隔。真人的分寸感来自反馈：发了之后对方理不理。
-    最近 10 次里：
-        回应率 ≥ 0.5   → ×1.0（他爱聊，正常节奏）
-        0.25 ~ 0.5     → ×1.5（有点冷，收敛些）
-        < 0.25         → ×2.0（基本不理，别烦人）
-    另外：如果他刚刚（15 分钟内）说过话，这轮直接推迟 —— 他人在，不需要"找"他。
+    真人的分寸感来自反馈：最近 10 次里 ≥0.5 → ×1.0，0.25~0.5 → ×1.5，
+    <0.25 → ×2.0。另外他 15 分钟内说过话就这轮推迟 —— 他人在，不需要"找"他。
     """
     d = _proactive_stats_load()
     sent = (d.get("sent") or [])[-10:]
@@ -957,11 +894,8 @@ def _proactive_count_up():
 def _recent_her_texts(n=12):
     """她最近说过的 n 句话（读聊天存档尾部）。
 
-    主动搭话去重要用：她每轮主动说话时，上下文里就有自己刚说过的话，
-    模型会原样（或截一段）再吐一次 —— 2026-10-01 实测 08:43/09:43、
-    09-29 14:42/19:42、10-01 12:37/12:44 都是这么来的：前后没有他的消息
-    （说明是主动搭话写的），内容一字不差。不比对就写，用户看到的就是
-    "她把同一句话发两遍"。
+    主动搭话去重要用：她每轮主动说话时，上下文里就有自己刚说过的话，模型会原样
+    （或截一段）再吐一次 —— 用户看到的就是"她把同一句话发两遍"。
     """
     try:
         from paths import CHAT_LOG
@@ -1058,12 +992,11 @@ def _cloud_gen_image(prompt, model=None, negative_prompt=None, size=None,
                      image=None):
     """用硅基流动生一张图，存进 upload 目录，返回文件名。
 
-    negative_prompt：压"AI味"的关键（畸形手指 / 塑料假脸 / 糊）。默认给
-    GEN_NEGATIVE，显式传 "" 可关掉。size：自拍用 768x1024 竖图更像手机随手拍；
-    哪个尺寸不认就自动退回 1024x1024 —— 别让一张图因为尺寸参数整个挂掉。
-    image：参考图，**data URI 字符串**（2026-09-22 实测：传数组会报
-    "image should be a string"）。传了就是图生图/图片编辑，用来锁住她的长相，
-    见 `_cloud_gen_selfie`。这条路不通会自动丢掉图重试，别让一张脸把整张照片搭进去。
+    negative_prompt：压"AI 味"的关键，默认 GEN_NEGATIVE，显式传 "" 可关掉。
+    size：自拍用 768x1024 竖图更像手机随手拍；哪个尺寸不认就退回 1024x1024 ——
+    别让一张图因为尺寸参数整个挂掉。
+    image：参考图，**必须是 data URI 字符串**（传数组会报 "image should be a
+    string"）。传了就是图生图，用来锁住她的长相。这条路不通会自动丢掉图重试。
     """
     import base64 as _b64
     import urllib.request as _u
@@ -1136,17 +1069,12 @@ def _cloud_gen_image(prompt, model=None, negative_prompt=None, size=None,
     return name
 
 
-# ---------------------------------------------------------------- 她的标准长相
-# 2026-09-22 用户发来她本人的照片，说"她就长这样了"。在这之前生图只用 appearance
-# 那段**文字描述**，模型每张都自己现造一张脸 —— 这就是"自拍不像她"的根。
+# --- 她的标准长相 ---
+# 参考图（她本人的照片）是"脸像不像"的唯一依据。只用 appearance 那段文字描述
+# 生图，模型每张都自己现造一张脸 —— 这就是"自拍不像她"的根。
 #
-# 同日实测（云端真跑，结论都验过）：
-#   * Z-Image-Turbo 的 /images/generations **能吃 image（data URI）**，把她的照片
-#     当参考图、配一句"保持这张脸不变"，长相就钉住了，而且只要 4~30 秒；
-#   * 同指令下 Qwen-Image-Edit-2509 要 84~97 秒，脸还更"标准化"（像影楼模特），弃用；
-#   * 参考图**只给脸**（上半身裁切）最好 —— 整张沙滩照会把海景一起带进结果；
-#   * 提示词里**绝对不要描写长相**：一描述，模型就照文字自己造脸，参考图等于白喂
-#     （第一轮就是这么把脸换掉的）。
+# 实测：参考图只给脸（上半身裁切）效果最好，整张沙滩照会把海景一起带进结果；
+# 提示词里**绝对不要描写长相**，一描述模型就照文字自己造脸，参考图等于白喂
 _LOOK_CACHE = {"path": "", "uri": None}
 
 
@@ -1204,13 +1132,11 @@ def _look_ref_uri():
         return None
 
 
-# 锁脸这句有两个要点，都是 2026-09-22 拿真图对出来的：
+# 锁脸这句有两个要点：
 #   1) 必须是"照参考图本人画"。写成"生成一个像照片里这样的女孩"就废了 ——
-#      模型会重新画一个（第一轮实测就是这么把脸换掉的）。
-#   2) 只留**长相本身**的锚点（脸小 / 眼睛大 / 皮肤白 / 甜美），
-#      **不再写发型细节、也不再写任何风格词**（胶片质感、浅景深、手机随手拍…）——
-#      用户要求"把之前风格的提示词都忘掉"，风格词会让模型偏离参考图。
-#      发型交给参考图，别用文字去规定（两次拍摄的发型本来就不一样）。
+#      模型会重新画一个，参考图白给。
+#   2) 只留长相本身的锚点（脸小 / 眼睛大 / 皮肤白 / 甜美），不写发型、不写
+#      任何风格词 —— 发型交给参考图，风格词会让模型偏离参考图
 _LOOK_LOCK = ("照参考图里这个女孩本人画，就是她本人：脸小、眼睛大而清亮、"
               "皮肤白皙、长相甜美，长相和发型都跟参考图保持一致，不要换脸。")
 
@@ -1285,11 +1211,10 @@ def _cloud_diary_read(date_str):
 
 
 def start_remote_api(brain):
-    """给"远程桌宠"开的门：本地桌宠变成薄客户端，经 SSH 隧道连这个
-    API 用云上的大脑聊天 —— 记忆/人设/生活只有云上一份，天然同步。
+    """给"远程桌宠"开的门：桌宠是薄客户端，经 SSH 隧道连这个 API 用云上的大脑
+    聊天 —— 记忆 / 人设 / 生活只有云上一份，天然同步。
 
-    只绑 127.0.0.1（公网碰不到），凭 token 鉴权。本进程养着她时才启动
-    —— 同一时间只允许一个进程养她，否则两边会互相覆盖记忆。
+    只绑 127.0.0.1（公网碰不到），凭 token 鉴权。同一时间只允许一个进程养她。
     """
     tok = BRAIN_TOKEN
     port = 8788
@@ -1368,9 +1293,7 @@ def start_remote_api(brain):
                         })
                     except Exception:
                         pass
-                    # 带上这条回复的时刻：手机 App 靠它显示每条消息的时间。
-                    # 以前不返回，前端 addMsg 只能传空串 —— 结果"刚聊完的消息
-                    # 一条时间都没有"，只有重进页面走 /api/history 才带 t。
+                    # 带上这条回复的时刻：App 靠它显示每条消息的时间，不返回的话前端只能传空串
                     self._json(200, {"reply": ans, "mode": mode, "err": err,
                                      "t": time.strftime("%Y-%m-%d %H:%M")})
                 elif path == "/api/proactive":
@@ -1415,10 +1338,8 @@ def start_remote_api(brain):
                         cfg["persona_file"] = "personas/%s.json" % key
                         with open(cfg_path, "w", encoding="utf-8") as f:
                             json.dump(cfg, f, ensure_ascii=False, indent=2)
-                        # 关键坑（2026-09-22）：内存里的 api_config 必须同步改！
-                        # brain.api 就是启动时 load_config() 的那份同一字典，
-                        # reload_persona() 读的是内存的 persona_file——只写盘不改内存，
-                        # 热重载会重载回旧人设，App 的"当前"标记也永远停在第一套。
+                        # 内存里的 api_config 必须同步改：reload_persona() 读的是内存的 persona_file，
+                        # 只写盘不改内存的话热重载会载回旧人设，App 的"当前"标记也永远停在第一套
                         api_config["persona_file"] = cfg["persona_file"]
                         with _LOCAL["lock"]:
                             brain.reload_persona()
@@ -1433,13 +1354,8 @@ def start_remote_api(brain):
                     except Exception as e:
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/voice/apply":
-                    # App 一键换声音（2026-10-01 加，用户要求"能不能在 App 里快速换"）。
-                    # 与人设切换同构，但**有两处内存要同步**：
-                    #   1) api_config —— 落盘的那份，下次启动读它；
-                    #   2) API_CFG     —— voice.synth() 实际收到的是这个对象，
-                    #      它只是启动时从 api_config 拷出来的**浅拷贝**，
-                    #      改 api_config 不会带着它变（这就是 09-28 vision 那个坑）。
-                    # 只改一处都会出现"看着换了、声音没变"。
+                    # 与人设切换同构，但**有两处内存要同步**：api_config（落盘的那份）和
+                    # API_CFG（voice.synth() 实际收到的浅拷贝）。只改一处会出现"看着换了、声音没变"
                     try:
                         key = os.path.basename(str(body.get("key") or ""))
                         import voice
@@ -1475,9 +1391,7 @@ def start_remote_api(brain):
                         api_config["voice"] = sub
                         API_CFG["voice"] = sub
                         # 换音色不用重启、不用重建 Brain：synth() 每次都现读配置。
-                        # 但**语音缓存按 (文本, 模型, 音色) 做 key**（voice._cache_path），
-                        # 所以换完不会串音、也不会白花钱重合成 —— 两句一样的旧语音
-                        # 会各存一份，这是刻意的。
+                        # 语音缓存按 (文本, 模型, 音色) 做 key，所以换完不会串音、也不会白花钱重合成
                         print(f"[大脑] 声音已切换为 {desc}（API_CFG 已同步）",
                               flush=True)
                         self._json(200, {"ok": True, "key": key, "desc": desc,
@@ -1486,11 +1400,8 @@ def start_remote_api(brain):
                         errlog.log_exc("api/voice/apply", e)
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/voice/preview":
-                    # 试听某个音色（App 列表里点"试听"）。合成完**不切换**——
-                    # 关键就在这儿：必须用一份**临时配置**去合成，绝不能顺手
-                    # 改了全局 api_config / API_CFG，否则"试听"会变成"直接换掉她的声音"。
-                    # 同一句 + 同一音色的结果会被 voice.synth 缓存（key 含音色），
-                    # 所以反复试听同一个不重复花钱。
+                    # 试听必须用一份**临时配置**去合成，绝不能顺手改全局 api_config / API_CFG，
+                    # 否则"试听"会变成"直接换掉她的声音"
                     try:
                         key = os.path.basename(str(body.get("key") or ""))
                         import voice
@@ -1514,10 +1425,8 @@ def start_remote_api(brain):
                         errlog.log_exc("api/voice/preview", e)
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/models/apply":
-                    # App 换模型：写 config.json **并且** 同步内存。
-                    # 只写盘是没用的 —— Brain 拿的是启动时 load_config() 那一份
-                    # 字典，不清空重填的话换了模型她还用旧的（2026-09-22 人设切换
-                    # 踩过一模一样的坑）。
+                    # 写 config.json **并且**同步内存：只写盘没用 —— Brain 拿的是启动时
+                    # load_config() 那一份字典，不清空重填的话换了模型她还用旧的
                     try:
                         new_cfg, changed = model_hub.apply_cfg(api_config, body)
                         if not changed:
@@ -1656,9 +1565,8 @@ def start_remote_api(brain):
                     pass
                 self._json(200, {"name": name, "key": cur, "presets": presets})
             elif path == "/api/voices":
-                # App 设置页「她的声音」：有哪些能选、现在是哪个。
-                # 清单是 voice.VOICE_CATALOG 里的死数据，**不联网**——
-                # 设置页必须永远打得开，不能因为平台抖动就变成一片空白。
+                # 清单是 voice.VOICE_CATALOG 里的死数据，**不联网** ——
+                # 设置页必须永远打得开，不能因为平台抖动就变成一片空白
                 try:
                     import voice
                     # 扫一眼缓存目录，让 App 能顺手看到"这个声音攒了几条语音"
@@ -1678,7 +1586,6 @@ def start_remote_api(brain):
                     self._json(200, {"ok": False, "err": str(e)[:120],
                                      "current": "", "items": []})
             elif path == "/api/models":
-                # App「模型」页要的三样：服务商列表 / 分类好的模型清单 / 现在用哪个。
                 # force=1 = 用户点了"重新拉取"，不用缓存（换 key 之后必须这样拉一次）
                 try:
                     force = str(_query_param(self.path, "force") or "") == "1"
@@ -1801,9 +1708,8 @@ def start_remote_api(brain):
                 except OSError:
                     self._json(404, {"err": "read fail"})
                     return
-                # 后缀 → MIME。2026-10-01 换阿里后**输出格式不再固定是 mp3**
-                # （阿里那条线的 format 可配，wav/opus 都是合法值，
-                #  voice._ext_of 决定落地后缀），写死 audio/mpeg 会让 wav 播不出来。
+                # 后缀 → MIME。阿里那条线的输出格式可配（wav / opus 都合法），
+                # 写死 audio/mpeg 会让 wav 播不出来
                 _ct = {".wav": "audio/wav", ".mp3": "audio/mpeg",
                        ".opus": "audio/ogg", ".ogg": "audio/ogg"}
                 self.send_response(200)
@@ -1836,8 +1742,8 @@ def start_remote_api(brain):
             pass
 
     # 默认只绑 127.0.0.1（公网碰不到）。要让手机 App 直接连，必须配
-    # `bind_host: "0.0.0.0"`（或走 Tailscale/隧道），靠 token 兜底鉴权。
-    # 老配置里这个值在 mobile.remote_host，继续认（迁移期兜底）。
+    # `bind_host: "0.0.0.0"`，靠 token 兜底鉴权；旧配置里这个值在
+    # mobile.remote_host，继续认
     host = str(api_config.get("bind_host")
                or MOB_CFG.get("remote_host") or "127.0.0.1")
     srv = http.server.ThreadingHTTPServer((host, port), _Handler)
@@ -1849,8 +1755,8 @@ def start_remote_api(brain):
 
 # 生图统一后缀：让她发的照片像"手机随手拍"，不是 AI 画
 def _her_look():
-    """她的人设外貌描述。**现在只是兜底**：自拍默认用参考图锁脸
-    （见 `_cloud_gen_selfie`），只有参考图缺失 / 调用失败时才退回文字描述生图。
+    """她的人设外貌描述。**现在只是兜底**：自拍默认用参考图锁脸，只有参考图缺失
+    或调用失败时才退回文字描述生图。
     """
     try:
         return str((_LOCAL["brain"].persona or {}).get("appearance") or "")
@@ -1860,7 +1766,7 @@ def _her_look():
 
 def _moment_img_ok(name):
     """[img:名字] 引用的图必须真存在，否则 App 会显示裂图。
-    生成图存在 upload 目录，也可能是聊天里出现过的贴图/照片（走 _cloud_sticker 解析）。"""
+    生成图存在 upload 目录，也可能是聊天里出现过的贴图 / 照片（走 _cloud_sticker 解析）。"""
     try:
         name = (name or "").strip()
         if not name or "/" in name or "\\" in name:
@@ -1877,21 +1783,17 @@ def _moment_img_ok(name):
 
 
 def _add_moment_from_answer(ans):
-    """把模型 '发\\n正文…' 的回答解析成一条朋友圈并落盘。
+    """把模型 '发 / 正文…' 的回答解析成一条朋友圈并落盘。返回 True 表示真发了。
 
-    2026-09-22：用户要她"像普通女孩一样发朋友圈"（自拍 / 好吃的 / 风景 / 校园猫狗 /
-    八卦…）。配图三种标签，语义不同：
-      [selfie:描述] 照片里有她本人 → 走参考图锁脸（_cloud_gen_selfie）+ 竖图
-      [gen:描述]    照片里没有她（吃的/风景/猫狗）→ 直接照描述生成
-      [img:文件名]  引用一张**已存在**的图（她记忆里发过的照片/贴图）
-    三种都带 GEN_NEGATIVE 压"AI 味"。返回 True 表示成功发了一条。
+    配图三种标签，语义不同：
+    [selfie:描述] 照片里有她本人 → 走参考图锁脸 + 竖图
+    [gen:描述]    照片里没有她（吃的 / 风景 / 猫狗）→ 直接照描述生成
+    [img:文件名]  引用一张**已存在**的图
+    三种都带 GEN_NEGATIVE 压"AI 味"。
 
-    两个坑（都是 2026-09-22 实测踩到的，别改回去）：
-      1) 模型常把标签写在**正文同一行末尾**（"...改天我也想搞一个 [img:xx.jpg]"），
-         不是独立一行 —— 所以必须全文正则找，**不能按整行匹配**，
-         否则标签原样漏进正文、配图还丢了。
-      2) 模型会"抄"历史里见过的 [img:名字]，但那个名字未必存在 —— 必须校验，
-         不存在就丢掉标签，否则 App 上是裂图。
+    两个坑：模型常把标签写在**正文同一行末尾**，所以必须全文正则找、不能按整行匹配，
+    否则标签原样漏进正文、配图还丢了；模型还会"抄"历史里见过的文件名，而那个名字
+    未必存在 —— 必须校验，否则 App 上是裂图。
     """
     import re as _re
     import moments
@@ -1930,9 +1832,8 @@ def _add_moment_from_answer(ans):
     if not body and not imgs:
         return False
     moments.add_moment(body, imgs)
-    # 2026-09-29：发完得告诉她"自己"一声 —— 追一条她自己的经历。
-    # 不然她发完就忘，聊天里提不起来（用户问"她知道自己发朋友圈吗"，
-    # 原来的答案就是"不知道"：moments.json 和 life 的 events 是两套东西）。
+    # 发完得追一条她自己的经历，否则她发完就忘、聊天里提不起来
+    # （moments 和 life 的 events 本来是两套东西）
     try:
         life = getattr(_LOCAL["brain"], "life", None)
         if life is not None:
@@ -1945,17 +1846,16 @@ def _add_moment_from_answer(ans):
 def try_post_moment(b):
     """让她"想想要不要发朋友圈"，要发就发掉。返回 (她这次的原话, 是否真发了)。
 
-    抽出来给两处共用：后台 _moment_loop（定时）和 /api/moment_now（手动催一条）。
-    原话一定要返回 —— 她回"无"（决定不发）和格式跑偏，从结果上看都是"没发"，
-    不把原话打出来根本分不清（2026-09-22 就是靠这个才排查出问题）。
+    抽出来给两处共用：后台 _moment_loop 和 /api/moment_now。原话一定要返回 ——
+    她回"无"和格式跑偏，从结果上看都是"没发"，不打原话根本分不清。
     """
     import moments
     life = getattr(b, "life", None)
     events = life.events(days=2) if life else []
     recent = [m.get("text") for m in moments.list_moments(3)]
     prompt = moments.moment_prompt_with_events(events, recent=recent)
-    # 走朋友圈专用通道（Brain.moment）：不能用 chat()，否则提示词被包成
-    # "他现在对你说：…" + 最近聊天，模型会当成聊天消息只回一个"发"字（2026-09-22 踩过）
+    # 走朋友圈专用通道 Brain.moment：用 chat() 的话提示词会被包成
+    # "他现在对你说：…" + 最近聊天，模型会当成聊天消息只回一个"发"字
     if hasattr(b, "moment"):
         ans = b.moment(prompt)
     else:
@@ -1969,8 +1869,8 @@ _SEEDED_AT = {"t": 0.0}      # 种开场圈的时刻；让 _moment_loop 的首�
 
 
 def _seed_initial_moment(b):
-    """启动时空着朋友圈太尴尬：若她一条都没有，先用今天/昨天的经历种一条，
-    免得用户点开发现啥都没有。失败就静默跳过（下次循环还会再试）。"""
+    """启动时空着朋友圈太尴尬：她一条都没有的话，先用今天 / 昨天的经历种一条。
+    失败就静默跳过（下次循环还会再试）。"""
     import moments
     try:
         time.sleep(8)        # 等 API 稳一点再发首条
@@ -1997,8 +1897,8 @@ def run_server():
         except Exception as e:
             print(f"[大脑] 远程大脑 API 没起来（不影响主服务）：{e}",
                   flush=True)
-        # 生活补算：她过日子 + 夜里写日记（云上没有桌宠定时器，靠这个补；
-        # catch_up 幂等 + 自带节流，循环着跑才不会漏掉跨天）
+        # 生活补算：她过日子 + 夜里写日记（云上没有桌宠定时器，靠这个补）。
+        # catch_up 幂等 + 自带节流，循环着跑才不会漏掉跨天
         def _life_loop(b):
             while True:
                 catch_up_life_local(b)
@@ -2007,9 +1907,8 @@ def run_server():
                          args=(_LOCAL["brain"],), daemon=True).start()
 
         # 历史摘要：把滑出窗口的旧对话压成"聊过什么"，让她不忘前几天。
-        # 2026-09-29 加。以前 12 条窗口之外的原话是直接丢掉的，丢了不变成
-        # 任何东西 —— 这就是"昨天聊的今天就忘"。现在按天压成摘要跟着走。
-        # 启动 60 秒后先补一次（把积压的全压完，实测约 ¥0.03），之后每 20 分钟。
+        # 以前 12 条窗口之外的原话是直接丢掉的，这就是"昨天聊的今天就忘"。
+        # 启动 60 秒后先补一次（把积压的压完），之后每 20 分钟
         def _recap_loop(b):
             import recap_store
             time.sleep(60)
@@ -2040,9 +1939,8 @@ def run_server():
             first = True
             while True:
                 try:
-                    # 启动后先快跑一次（150s），保证"今天有东西可看"，别让用户重启完
-                    # 干等一小时才等到她发圈；刚种过开场圈就跳过这次，免得两分钟内连发两条。
-                    # 之后恢复每小时一次。
+                    # 启动后 150s 先快跑一次，保证"今天有东西可看"，别让用户重启完干等一小时；
+                    # 刚种过开场圈就跳过这次，免得两分钟内连发两条。之后恢复每小时一次
                     time.sleep(150 if first else 3600)
                     if first and (time.time() - _SEEDED_AT["t"]) < 1500:
                         first = False
@@ -2054,8 +1952,8 @@ def run_server():
                     if posted:
                         print("[大脑] 她发了一条朋友圈", flush=True)
                     else:
-                        # 把原话打出来：她才有可能只是"这轮不想发"，也可能是格式跑偏。
-                        # 只看到"没发"是没法区分这两种情况的（2026-09-22 靠这个排查）
+                        # 必须把原话打出来：她可能只是"这轮不想发"，也可能是格式跑偏，
+                        # 只看"没发"分不清这两种情况
                         print("[大脑] 朋友圈：这轮没发，她的原话＝%s"
                               % raw.replace("\n", " / ")[:140], flush=True)
                 except Exception as e:
@@ -2076,9 +1974,7 @@ def run_server():
                     base = int(pa.get("interval_sec") or 2400)
                     interval = base
                     if pa.get("adaptive", True):
-                        # 自适应频率：按"上次主动后他理不理"伸缩（见
-                        # _proactive_interval_multiplier）。上限 2 小时 ——
-                        # 再冷也别变成半小时一条，那已经算骚扰了。
+                        # 自适应频率的伸缩上限 2 小时 —— 再冷也别变成半小时一条，那已经算骚扰
                         interval = int(base * _proactive_interval_multiplier())
                         cap = int(pa.get("max_interval_sec") or 7200)
                         interval = min(interval, cap)
@@ -2091,8 +1987,7 @@ def run_server():
                     time.sleep(max(300, interval))
                     if not pa.get("enabled", True):
                         continue
-                    # 静默时段：默认 23:00~07:00。
-                    # 旧代码 24 小时不停，凌晨那 8 条就是这么来的。
+                    # 静默时段默认 23:00~07:00。旧代码 24 小时不停，凌晨那 8 条就是这么来的
                     qs = pa.get("quiet_start", "23:00")
                     qe = pa.get("quiet_end", "07:00")
                     if _in_quiet(qs, qe):
@@ -2119,8 +2014,8 @@ def run_server():
                     if not text:
                         continue
                     text = resolve_voice_tag(text, API_CFG)
-                    # 去重闸门：她最近已经说过（或截一段说过）就不再发第二遍。
-                    # 原因见 _recent_her_texts —— 主动搭话会复述上下文里自己刚说的话。
+                    # 去重闸门：她最近已经说过（或截一段说过）就不发第二遍，
+                    # 原因见 _recent_her_texts —— 主动搭话会复述上下文里自己刚说的话
                     if _is_repeat_of_recent(text):
                         print("[大脑] 主动搭话：和最近说过的话重复，这轮不发",
                               flush=True)

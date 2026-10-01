@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-"""用 gradle 正式构建安卓 APK。
+r"""用 gradle 正式构建安卓 APK。
 
-想快速换个 chat.html 打包，走 `.workbuddy/scripts/tools/_repackage.py`
-（那份脚本不入库，属于本地工具），本文件只管 gradle 全量构建。
+只负责 gradle 全量构建；只想换个 chat.html 快速打包，用本地工具
+`.workbuddy/scripts/tools/_repackage.py`（不入库）。
 
-2026-10-01：原来的版本里写死了 `C:\Users\<用户名>\...` 这种本机绝对路径，
-公开仓库里会暴露系统用户名和私人目录结构 —— 现在一律改成"从仓库位置 +
-环境变量推"，任何人 clone 下来都能改两个变量直接用。
+路径不写死本机目录：SDK / gradle 从 ANDROID_TOOLS 环境变量取，
+没有就落到默认位置，JDK 从 JAVA_HOME 取。
+
+注意本 docstring 是 raw 字符串（前缀 r）：正文里会出现 C:\Users\... 这类
+Windows 路径，普通字符串会把 \U 当转义符，整个文件直接 SyntaxError。写成
+普通字符串时，路径里的反斜杠必须全部双写。
 """
 import glob
 import os

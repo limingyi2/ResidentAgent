@@ -1,29 +1,19 @@
 # -*- coding: utf-8 -*-
 """进阶记忆库 v2.1：向量检索 + API 智能提取 + 规则降级
 
-v2.1 改动（2026-09-17）
-----------------------
-1. 向量由「每条记忆一个 .npy」改为「单个 vectors.npy 矩阵 + ids.json」
-   旧格式（emb 目录下的散装 .npy）会在首次加载时自动迁移，无需手工处理
-2. 索引首次加载后常驻内存，检索是纯矩阵运算，不再逐条读盘
-   —— 这条让机械硬盘也能跑，不会因为记忆变多而变卡
-3. 记忆目录改为可配置：读取同目录 config.json 的 memory_dir 字段
+索引是单个 vectors.npy 矩阵 + ids.json（旧格式"每条记忆一个 .npy"首次加载时自动
+迁移）。索引加载后常驻内存，检索是纯矩阵运算、不逐条读盘，机械硬盘也不怕记性变大。
 
-- 嵌入模型：云端 BAAI/bge-m3（1024 维），不可用时降级本地 fastembed
+嵌入走云端：云服务器连不上 HuggingFace，本地 fastembed 每次初始化都要去 HF 下模型、
+必然超时 —— 结果 11 条记忆只有 2 条有向量，retrieve() 永远走"最近几条"的降级分支，
+等于没有语义检索。现在走 config.json 里同一个 api_base 的 /embeddings。
+
+硅基流动上**没有** bge-small-zh-v1.5（报 Model does not exist），可用的中文模型是
+BAAI/bge-m3 与 BAAI/bge-large-zh-v1.5，均为 1024 维。换模型会让旧向量维度对不上，
+所以用 embed_meta.json 记下模型名，发现不一致就整体重建索引。
+
 - retrieve(query, top_k)：按语义相似度只注入最相关的记忆
-- 提取：优先 API（OpenAI 兼容），失败/无 key 自动降级规则提取
-
-v2.2 改动（2026-09-21）
-----------------------
-嵌入改为「云端 API 优先」。原因：云服务器连不上 HuggingFace，本地 fastembed
-每次初始化都要去 HF 下模型，必然超时 —— 结果 11 条记忆只有 2 条有向量，
-retrieve() 永远走"最近 5 条"降级分支，等于没有语义检索。
-现在走 config.json 里同一个 api_base 的 /embeddings 接口（硅基流动）。
-
-注意：硅基流动上**没有** bge-small-zh-v1.5（会报 Model does not exist），
-可用的中文模型是 BAAI/bge-m3 / BAAI/bge-large-zh-v1.5，均为 1024 维。
-换模型会让旧向量维度对不上，所以用 embed_meta.json 记下模型名，
-发现不一致就整体重建索引（见 MemoryStore._load_index）。
+- 提取：优先 API（OpenAI 兼容），失败 / 无 key 自动降级规则提取
 """
 import json, os, re, time, sys
 import numpy as np
@@ -94,11 +84,10 @@ def get_embedder():
 
 
 def embed_texts(texts):
-    """把文本变成向量。云端优先，失败降级本地 fastembed，再失败返回 []
+    """把文本变成向量。云端优先，失败降级本地 fastembed，再失败返回 []。
 
-    返回 [] 时调用方会走"最近几条"的降级检索，不会崩。
-    _embed_dead 是进程内开关：确认挂了之后就不再每轮重试，
-    否则每句话都要白等一次连不上的请求，拖慢她的响应。
+    返回 [] 时调用方会走"最近几条"的降级检索，不会崩。_embed_dead 是进程内开关：
+    确认挂了之后就不再每轮重试，否则每句话都要白等一次连不上的请求。
     """
     global _embed_dead
     if not texts:
@@ -187,7 +176,7 @@ class MemoryStore:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, ensure_ascii=False, indent=2)
 
-    # ---------- 向量索引 ----------
+    # --- 向量索引 ---
     def _load_index(self):
         """把向量索引读进内存。只在第一次调用时产生磁盘 IO，之后检索零读盘"""
         if self._index_loaded:
@@ -304,7 +293,7 @@ class MemoryStore:
                                                      dtype=np.float32))
         return self._mat
 
-    # ---------- 写入 ----------
+    # --- 写入 ---
     def add(self, text, mtype="event"):
         """添加一条记忆（自动向量化）"""
         text = text.strip()
@@ -353,7 +342,7 @@ class MemoryStore:
     def list_items(self):
         return list(self.data["items"])
 
-    # ---------- 向量检索 ----------
+    # --- 向量检索 ---
     def retrieve(self, query, top_k=5, min_score=0.25):
         """按语义相似度返回 Top-K 记忆文本。索引在内存里，不逐条读盘"""
         if not self.data["items"]:
@@ -383,12 +372,10 @@ class MemoryStore:
         return out
 
     def render(self, query=None, top_k=5, max_items=20, min_score=0.40):
-        """注入块：有 query 用检索，无 query 用最近 max_items 条
+        """注入块：有 query 用检索，无 query 用最近 max_items 条。
 
-        min_score 2026-09-29 从 0.25 提到 0.40。
-        0.25 太松：随便一句闲聊都能拉出 5 条"沾边"的旧记忆塞进上下文，
-        她的话题和情绪被旧事带跑（用户反馈"说完这句下句就变了"）。
-        宁可少喂，不可喂错 —— 记忆是调味，不是主菜。
+        min_score 取 0.40 而不是 0.25：0.25 太松，随便一句闲聊都能拉出 5 条"沾边"的旧记忆
+        塞进上下文，她的话题和情绪被旧事带跑。宁可少喂，不可喂错 —— 记忆是调味，不是主菜。
         """
         if query:
             hits = self.retrieve(query, top_k=top_k, min_score=min_score)
@@ -412,7 +399,7 @@ class MemoryStore:
         return {"目录": self.embed_dir, "记忆条数": total, "已向量化": len(self._ids),
                 "向量大小": f"{vec_mb:.2f} MB", "memory.json": f"{json_kb:.1f} KB"}
 
-    # ---------- API 智能提取 ----------
+    # --- API 智能提取 ---
     @staticmethod
     def extract_with_api(user_text, api_config=None, timeout=25):
         """用 OpenAI 兼容 API 提取记忆，返回 (facts, events)"""
@@ -449,7 +436,7 @@ class MemoryStore:
         except Exception:
             return None
 
-    # ---------- 规则提取（降级） ----------
+    # --- 规则提取（降级） ---
     @staticmethod
     def extract_rule(user_text):
         out = []

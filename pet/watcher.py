@@ -2,17 +2,14 @@
 """活动感知模块 —— 让角色知道你在干嘛
 
 只做两件很轻的事，**完全不截屏、不碰任何视觉模型**：
-
 1. 读前台窗口的进程名和标题（ctypes 直接调 Windows API，开销几乎为零）
-2. 从标题/进程名猜你在干嘛（刷B站 / 写代码 / 打游戏…）
+2. 从标题 / 进程名猜你在干嘛（刷 B 站 / 写代码 / 打游戏…）
 
-猜到你在做不同的事时，回调 on_activity —— 这就是"主动搭话"的入口。
-另外前台切成"游戏 / 铺满全屏"时回调 on_game —— 立绘据此自动让开，不挡画面。
+猜到你在做不同的事时回调 on_activity —— 这就是"主动搭话"的入口；
+前台切成"游戏 / 铺满全屏"时回调 on_game，立绘据此自动让开、不挡画面。
 
-（历史：以前这里还能截屏 + 用本地 4B / 云端 8B 视觉模型看图，
- 已按用户要求整体移除——截图上传有隐私成本、本地模型占 8.3GB 和显存，
- 而且实测会把屏幕上的文字抄下来当话题，说些莫名其妙的话。
- 现在只保留零成本的窗口标题判断。）
+（以前这里还能截屏 + 用视觉模型看图，已整体移除：截图上传有隐私成本、本地模型占
+显存，而且实测会把屏幕上的文字抄下来当话题，说些莫名其妙的话。）
 """
 
 import time, ctypes, threading, datetime
@@ -21,7 +18,7 @@ import ctypes.wintypes as wt
 import psutil
 
 
-# ---------------------------------------------------------------- 前台窗口
+# --- 前台窗口 ---
 
 _user32 = ctypes.windll.user32
 
@@ -29,8 +26,7 @@ _user32 = ctypes.windll.user32
 def get_foreground():
     """拿当前前台窗口的进程名和标题。
 
-    这一步非常轻（就是读两个系统 API），可以每秒跑很多次，
-    对游戏帧率的影响可以忽略不计。
+    这一步非常轻（就是读两个系统 API），可以每秒跑很多次，对游戏帧率的影响可以忽略。
     """
     hwnd = _user32.GetForegroundWindow()
     if not hwnd:
@@ -62,7 +58,7 @@ def get_foreground():
     return {"exe": exe, "title": title, "pid": pid.value, "fullscreen": fullscreen}
 
 
-# ---------------------------------------------------------------- 游戏判断
+# --- 游戏判断 ---
 
 # 常见游戏进程名（小写）。命中就认为在打游戏。
 GAME_EXE = {
@@ -176,7 +172,7 @@ def guess_from_title(fg):
     return ""
 
 
-# ---------------------------------------------------------------- 主循环
+# --- 主循环 ---
 
 DEFAULT_CFG = {
     "enabled": True,        # 总开关
@@ -199,10 +195,9 @@ DEFAULT_PROACTIVE = {
 
 
 class ActivityWatcher:
-    """监控你在干嘛（只看窗口标题/进程名，不截屏）。
+    """监控你在干嘛（只看窗口标题 / 进程名，不截屏）。
 
-    刻意不用 QThread —— 用普通线程 + 回调，这样单独测试也方便。
-    pet.py 里再用 Qt 信号把回调接到界面上。
+    刻意不用 QThread —— 用普通线程 + 回调，单独测试方便，pet.py 再用 Qt 信号接到界面上。
     """
 
     def __init__(self, api_config, cfg=None, on_activity=None, on_status=None,
@@ -341,9 +336,9 @@ class ActivityWatcher:
         if guess and guess != prev:
             self._last_fg["guess"] = guess
             self._emit_status(guess, fg, source="title")
-            # 活动从一件事切到另一件事时，让她主动说一句 —— 这是"主动搭话"的入口。
-            # 用独立间隔挡着，避免切窗口太频繁时刷屏；
-            # 启动后的第一次检测不算（prev 为 None），不冷不丁开口。
+            # 活动从一件事切到另一件事时让她主动说一句 —— 这是"主动搭话"的入口。
+            # 用独立间隔挡着，避免切窗口太频繁时刷屏；启动后的第一次检测不算（prev 为 None），
+            # 不冷不丁开口
             if (self.pro.get("on_activity_change", True)
                     and prev is not None
                     and now - self._last_speak

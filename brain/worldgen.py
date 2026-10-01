@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 """随机生成角色的世界设定（学校 / 专业 / 课表 / 室友 …）。
 
-之前 world.json 是一份写死的示例（海青大学 · 计算机）。现在改成默认随机：
-- 专业从一批真实存在的大类里随机抽，课表按专业从对应课程池生成；
-- 她的大学生活严格按这份设定过（life_engine 当硬约束），
-  但"真实过完每一天"靠的是 life_engine 的每日补算，课表只是背景板。
+以前 world.json 是一份写死的示例（海青大学 · 计算机），现在默认随机：专业从一批真实
+大类里抽，课表按专业从对应课程池生成。她的大学生活严格按这份设定过（life_engine 当
+硬约束），但"真实过完每一天"靠的是 life_engine 的每日补算，课表只是背景板。
 
 用法：
-    python worldgen.py           覆盖写 config/world.json（自动备份旧版到 archive/）
-    python worldgen.py --check   只打印一份生成结果，不落盘
-    python worldgen.py --seed 7  固定随机种子（调试用，同一个种子永远同一份世界）
+python worldgen.py           覆盖写 config/world.json（旧版自动备份到 archive/）
+python worldgen.py --check   只打印一份生成结果，不落盘
+python worldgen.py --seed 7  固定随机种子（调试用，同一种子永远同一份世界）
 """
 import os
 import sys

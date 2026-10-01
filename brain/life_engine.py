@@ -1,31 +1,24 @@
 # -*- coding: utf-8 -*-
 """角色 · 她自己的生活
 
-她在你不在的时候也在过日子。这个模块负责那部分。
+她在你不在的时候也在过日子，这个模块负责那部分。
 
-核心是「惰性补算」而不是常驻定时器
---------------------------------
-不做"每半小时定时生成" —— 你关机时她不需要过日子，那些调用纯属白烧。
-改成：只在她马上要被用到的时候（打开聊天窗 / 她主动搭话 / 你打开她的日记）
-才把「上次记到的位置 → 现在」这段空白补出来。她睡觉那 9 小时直接跳过。
+核心是「惰性补算」而不是常驻定时器：不做"每半小时定时生成"—— 你关机时她不需要
+过日子，那些调用纯属白烧。改成只在她马上要被用到的时候（打开聊天窗 / 她主动搭话 /
+你打开她的日记）才把「上次记到的位置 → 现在」这段空白补出来，她睡觉那 9 小时直接
+跳过。补算是幂等的：真相存在 events.jsonl 里，某个 (日期, 时段) 只要有过记录就
+不再生成。
 
-补算是幂等的：真相存在 events.jsonl 里，某个 (日期, 时段) 只要有过记录就不再生成。
+两套记忆必须分开：data/memory/ 是关于**用户**的事实，her_life/ 是她**自己**的经历。
+混在一起的后果是 —— 她会把你的实习说成她的实习。所以这里产出的文本一律以"你自己
+的事"开头，跟"你记得他的事"并排注入、互不相通。
 
-两套记忆必须分开（重要）
------------------------
-    data/memory/  关于**用户**的事实      （不归这里管）
-    her_life/    她**自己**的经历        （这里管）
-
-混在一起的后果你已经见过了 —— 她会把你的实习说成她的实习。
-所以这里产出的文本一律以"你自己的事"开头，跟"你记得他的事"并排注入、互不相通。
-
-目录结构
--------
-    config/world.json               她的世界：学校 / 课表 / 室友（硬约束，不许编）
-    data/her_life/state.json        此刻在干嘛 · 心情
-    data/her_life/events.jsonl      她的经历流（一行一条）
-    data/her_life/chat_YYYY-MM-DD.jsonl  当天和你的对话（写日记要用）
-    data/journal/YYYY-MM-DD.md      她自己写的日记
+目录结构：
+config/world.json                     她的世界：学校 / 课表 / 室友（硬约束，不许编）
+data/her_life/state.json              此刻在干嘛 · 心情
+data/her_life/events.jsonl            她的经历流（一行一条）
+data/her_life/chat_YYYY-MM-DD.jsonl   当天和你的对话（写日记要用）
+data/journal/YYYY-MM-DD.md            她自己写的日记
 """
 import os, re, json, time, datetime, threading
 import httpx
@@ -101,7 +94,7 @@ except Exception:                        # 兜底：路径规则变了也不至�
     LOCK_PATH = os.path.join(_HERE, "data", "run", "catchup.lock")
 
 # 跨进程锁：桌宠和其它入口是两个进程，可能同时开着。
-# threading.Lock 管不了跨进程，两边一起补算会重复烧 token、还可能写出重复经历。
+# threading.Lock 管不了跨进程，两边一起补算会重复烧 token、还可能写出重复经历
 LOCK_STALE = 300                    # 秒：补算最多几十秒，超过这个时长就当成残留锁
 
 DEFAULT_WORLD = {
@@ -133,8 +126,8 @@ DEFAULT_WORLD = {
 
 
 # ---------- 让模型生成世界（比代码随机更自然、更多样） ----------
-# 代码随机（worldgen.build_world）只有我写死的十几个专业/城市可选，一眼模板感。
-# 真正"真人随机感"得交给模型：本地 27B 优先（零成本），云端兜底，都不可用才回退代码随机。
+# 代码随机只有写死的十几个专业 / 城市可选，一眼模板感。真正"真人随机感"得交给模型：
+# 本地 27B 优先（零成本），云端兜底，都不可用才回退代码随机
 _WORLD_PROMPT = (
     "你是角色设定生成器。帮虚拟陪伴角色「角色」随机生成一套真实可信的中国女大学生活设定。\n\n"
     "要求：\n"
@@ -323,11 +316,7 @@ def _say(when, total_minutes):
 
 
 def _strip_self(s):
-    """去掉开头的"我/我正在" —— 这句要拼成「你此刻：…」，留着人称就串了。
-
-    模型写"现在:"那句时很爱用"我"开头（"我正窝在被窝里"），
-    而注入文本的前缀已经是"你此刻："，拼起来就成了"你此刻：我正…"。
-    """
+    """去掉开头的"我 / 我正在" —— 这句要拼成「你此刻：…」，留着人称就串了。"""
     s = (s or "").strip()
     return re.sub(r"^(?:我(?:现在|此刻|正|正在)?|现在|此刻)\s*", "", s)
 
@@ -345,9 +334,8 @@ class LifeEngine:
         self.timeout = timeout
         self.name = name
         self.home = home or LIFE_DIR
-        # 自定义 home 是测试用的：journal 挨着它放。
-        # 注意 world.json 已经搬到 config/ 了 —— 它是"你会手动改的设定"，
-        # 不再跟她的经历流混在一起，所以这里永远指向 WORLD_PATH。
+        # 自定义 home 是测试用的：journal 挨着它放。world.json 已经搬到 config/ 了
+        # （它是"你会手动改的设定"，不跟经历流混在一起），所以这里永远指向 WORLD_PATH
         self.journal_dir = os.path.join(home, "journal") if home else JOURNAL_DIR
         self.world_path = WORLD_PATH
         os.makedirs(self.home, exist_ok=True)
@@ -394,8 +382,8 @@ class LifeEngine:
             return None
 
     def regenerate_world(self, seed=None):
-        """重新生成一份身份并落盘。优先让模型生成（本地27B/云端，更自然），都失败才代码随机。
-        调用方负责：世界一变，旧的经历/日记会穿帮，要清掉重来。"""
+        """重新生成一份身份并落盘。优先让模型生成（本地 27B / 云端，更自然），都失败才代码随机。
+        调用方负责：世界一变，旧的经历 / 日记会穿帮，要清掉重来。"""
         w = self._gen_world_first_time()
         if w is None:
             from worldgen import build_world
@@ -758,11 +746,10 @@ class LifeEngine:
 
     # ---------- 主入口：惰性补算 ----------
     def _floor_date(self, now):
-        """她「开始过日子」的那天。
+        """她「开始过日子」的那天。第一次跑就是今天，之后写进 state.json 永久记住。
 
-        第一次跑就是今天，之后写进 state.json 永久记住。
-        没有这个锚点会有个很别扭的 bug：她今天才装上，第二次补算却会
-        把前 3 天"她还没存在"的日子也编出来。
+        没有这个锚点会有个很别扭的 bug：她今天才装上，第二次补算却会把前 3 天"她还没存在"
+        的日子也编出来。
         """
         s = self.state().get("started")
         if s:
@@ -810,10 +797,10 @@ class LifeEngine:
 
     # ---------- 跨进程锁（桌宠 / 其它入口可能同时开着） ----------
     def _acquire_file_lock(self):
-        """抢到返回 True。抢不到（别人正在补）返回 False。
+        """抢到返回 True，抢不到（别人正在补）返回 False。
 
-        用"建文件"当锁 —— O_CREAT|O_EXCL 是原子的，Windows 上也管用。
-        锁文件本身出任何问题都不该挡住正经功能，所以出错一律放行。
+        用"建文件"当锁 —— O_CREAT|O_EXCL 是原子的，Windows 上也管用。锁文件本身出任何问题
+        都不该挡住正经功能，所以出错一律放行。
         """
         try:
             os.makedirs(LIFE_DIR, exist_ok=True)
@@ -937,7 +924,7 @@ class LifeEngine:
             st["doing_slot"] = slot_of(now)[0]
             st["doing_at"] = _fmt(now)
         # 心情按天取：昨天的情绪不能留到今天。没有当天的就宁可不写，
-        # 别拿隔夜的糊弄（实测凌晨三点还在用"白天乱糟糟"那一句）
+        # 别拿隔夜的糊弄（实测凌晨三点还在用白天那句"乱糟糟"）
         if mood:
             st["mood"] = mood
         else:
@@ -970,10 +957,9 @@ class LifeEngine:
             lines.append("你的基本情况：")
             lines.extend(where.splitlines())
 
-        # 「此刻在干嘛」必须真的是此刻。
-        # 坑：23:00~07:00 不生成新片段，state 里的 doing 就一直卡在傍晚/晚上那一档
-        # —— 实测凌晨三点她还在"吃西瓜"，就是把几小时前的事当成了现在。
-        # 所以只有时段对得上才说"此刻"，否则一律改成过去时，别让她当成正在发生。
+        # 「此刻在干嘛」必须真的是此刻。23:00~07:00 不生成新片段，state 里的 doing 会一直
+        # 卡在傍晚 / 晚上那一档 —— 实测凌晨三点她还在"吃西瓜"，就是把几小时前的事当成了现在。
+        # 所以只有时段对得上才说"此刻"，否则一律改成过去时
         doing = st.get("doing") or ""
         if doing:
             when = st.get("doing_slot") or ""
@@ -1022,14 +1008,11 @@ class LifeEngine:
     def self_aware_block(self):
         """告诉她"你自己会写日记、会发朋友圈"这两件事。
 
-        2026-09-29 用户问"她知道自己写日记和发朋友圈吗"—— 查下来是不知道：
-        写日记走 `_diary_prompt` 那套独立提示词，朋友圈走 `moments.py`，
-        两条路都不经过聊天的 system prompt，人设里也没写。所以她在聊天里
-        永远提不起"我昨天写了篇日记""我刚发了条朋友圈"。
+        不声明的话她在聊天里永远提不起这两件事：写日记走 _diary_prompt 那套独立提示词、
+        朋友圈走 moments.py，两条路都不经过聊天的 system prompt，人设里也没写。
 
-        这里只声明"你会做这两件事"，不塞日记正文（正文归 diary_block，而且
-        她刚写完那篇反而故意不再塞）。最后那条边界是用户 2026-09-29 拍板的
-        产品决策：日记是她的私人物品，不整篇给人看。
+        这里只声明"你会做这两件事"，不塞日记正文（正文归 diary_block）。日记是她的私人物品，
+        不整篇给人看。
         """
         if not self.enabled:
             return ""
@@ -1041,14 +1024,13 @@ class LifeEngine:
                 "直接怼回去或者岔开（“想得美”“我自己看的”）。")
 
     def note_moment(self, text, imgs=None):
-        """把她刚发的朋友圈追记成一条自己的经历（2026-09-29 新增）。
+        """把她刚发的朋友圈追记成一条自己的经历。
 
-        以前发朋友圈只写进 moments.json，life 这边一条记录都没有 ——
-        她发完自己就忘了，第二天聊天提不起来（life_block 只看 events）。
+        以前只写进 moments.json，life 这边一条记录都没有 —— 她发完自己就忘了，第二天聊天提
+        不起来（life_block 只看 events）。
 
-        slot 固定用"朋友圈"，**不能用"晚上"这类时段名**：`_done_pairs()` 的
-        去重键是 (date, slot)，撞上就会把当天那个时段的正常经历补算给挡掉。
-        未知 slot 在 `_slot_gap_text` 里返回空，所以也不会显示成"约X小时前"。
+        slot 固定用"朋友圈"，**不能用"晚上"这类时段名**：_done_pairs() 的去重键是 (date, slot)，
+        撞上会把当天那个时段的正常经历补算挡掉。未知 slot 在 _slot_gap_text 里返回空。
         """
         text = (text or "").strip()
         if not text:

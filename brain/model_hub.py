@@ -1,28 +1,17 @@
 # -*- coding: utf-8 -*-
 """模型中枢：服务商、模型分类、当前配置的读写。
 
-为什么单独抽一个文件
---------------------
-模型调用原来散在三个地方，各读各的配置字段：
+模型调用原来散在三个地方、各读各的配置字段（brain.py 读 model、vision.py 读
+vision.model、server.py 里把生图模型写死），App 想换个模型就得同时改三处，还容易漏。
+抽到这里之后："现在用哪个模型"只有一份定义，分类规则也只有一份。
 
-    brain.py        对话   读 config.json 的 model
-    vision.py       看图   读 config.json 的 vision.model
-    server.py      生图   _cloud_gen_image() 里写死 Z-Image-Turbo
+几类模型（App 里就是这几个下拉）：
+chat 对话   vision 看图（把图翻译成一句中文给她看）   image 生图（自拍、朋友圈配图）
+audio 语音（还没做，位置先留着）   embed 向量（记忆检索用，App 里不显示）
 
-App 想换个模型就得同时改三处，还容易漏。抽到这里之后：
-"现在用哪个模型"只有一份定义，"这个名字是生图还是语言"只有一份规则。
-
-四类模型（App 里就是这四个下拉）
-------------------------------
-    chat     对话   她说每句话用的
-    vision   看图   他发图片时，把图翻译成一句中文给她看
-    image    生图   她的自拍、朋友圈配图
-    audio    语音   还没做，位置先留着（App 里置灰，标"还没做"）
-    embed    向量   记忆检索用的，App 里不显示（她不需要你选）
-
-分类从哪来：先问服务商 /v1/models 要真实列表，按名字关键字归类。
-拉不到（没网 / key 错了 / 平台改版）就用下面的兜底清单，并在返回值里
-标 source=fallback —— App 会提示"这是内置清单，可能不全"。
+分类从哪来：先问服务商 /v1/models 要真实列表，按名字关键字归类；拉不到（没网 /
+key 错了 / 平台改版）就用内置兜底清单，并在返回值里标 source=fallback ——
+App 会提示"这是内置清单，可能不全"。
 """
 import os
 import json
@@ -151,10 +140,9 @@ def _write_cache(base, ids):
 
 
 def fetch_online(base, key, timeout=12):
-    """问服务商要模型列表。返回 (ids, err)。失败时 ids 为空。
+    """问服务商要模型列表。返回 (ids, err)，失败时 ids 为空。
 
-    走 urllib + ProxyHandler({})：项目里所有出网请求都这么写，
-    不然会被系统代理劫持，返回一个假的 502（2026-09-28 刚踩过）。
+    走 urllib + ProxyHandler({})：不然会被系统代理劫持，返回一个假的 502。
     """
     if not base or not key:
         return [], "没填地址或密钥"
@@ -176,11 +164,8 @@ def fetch_online(base, key, timeout=12):
 
 
 def list_models(base, key, force=False, provider="siliconflow"):
-    """给 App 用的模型清单。
-
-    返回：
-        {ok, source, groups:{chat/vision/image/audio/embed}, count, err}
-    source = online（刚拉到）/ cache（用的缓存）/ fallback（拉不到，用内置清单）
+    """给 App 用的模型清单。返回 {ok, source, groups, count, err}；
+    source = online（刚拉到）/ cache（用的缓存）/ fallback（拉不到，用内置清单）。
     """
     if not force:
         cached = _read_cache(base)
@@ -200,7 +185,7 @@ def list_models(base, key, force=False, provider="siliconflow"):
             "err": err or "拉不到模型列表"}
 
 
-# ---------- 当前配置 ----------
+# --- 当前配置 ---
 def current(cfg):
     """从配置读出"现在用哪家、哪个模型"。key 只留前后各几位（防截图外泄）。"""
     cfg = cfg or {}
@@ -227,9 +212,9 @@ def current(cfg):
 def apply_cfg(cfg, p):
     """把 App 传来的设置并进配置字典（只改字典，不落盘）。
 
-    p 里的字段名跟 current() 一致：provider / api_base / api_key /
-    chat / vision / image / audio / vision_enabled。
-    返回 (新配置, 改了哪些项的中文说明)。空字符串＝不改那一项。
+    p 里的字段名跟 current() 一致：provider / api_base / api_key / chat / vision /
+    image / audio / vision_enabled。返回 (新配置, 改了哪些项的中文说明)；
+    空字符串＝不改那一项。
     """
     cfg = dict(cfg or {})
     changed = []

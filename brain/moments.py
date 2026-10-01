@@ -67,10 +67,9 @@ def _holiday_note(day_str):
 def moment_prompt_with_events(events, now=None, recent=None):
     """决定要不要发朋友圈时，把"现在几点 + 今天经历 + 最近发过啥"都喂进去。
 
-    没有这些，她常常"没话可说"就回'无'，朋友圈永远是空的（实测就是这个原因）；
-    也容易翻来覆去发同一种（老是自拍 / 老是吐槽）。
-      events：life.events(days=1) 这种列表，给她真实素材
-      recent：最近几条朋友圈正文，用来避免重复
+    没有这些她常常"没话可说"就回 '无'，朋友圈永远是空的；也容易翻来覆去发同一种。
+    events：life.events(days=1) 这种列表，给她真实素材
+    recent：最近几条朋友圈正文，用来避免重复
     """
     import datetime
     now = now or datetime.datetime.now()
@@ -152,11 +151,9 @@ def add_comment(mid, who, text):
 def reply_to_comment(brain, moment, comment_text):
     """她回复你给她朋友圈的评论（用她自己的口气）。
 
-    必须走 brain.moment() 这条干净通道 —— 2026-09-22 踩过的坑：
-    以前走 brain.chat()，聊天框架把提示词包成一条"他发来的消息"存进了
-    聊天记录和她的对话上下文，结果 App 聊天窗里凭空多出一大段
-    「你在朋友圈发了：…你怎么回他？」的绿色气泡（用户看到直接懵了），
-    她的上下文也被这种提示词搅得一团糟。moment() 不碰 hist、不落聊天存档。
+    必须走 brain.moment() 这条干净通道：以前走 brain.chat()，聊天框架把提示词包成一条
+    "他发来的消息"存进了聊天记录与她的上下文 —— App 聊天窗里凭空多出一大段
+    「你在朋友圈发了：…你怎么回他？」的绿色气泡，她的上下文也被搅乱了。
     """
     prompt = (f"你在朋友圈发了：{moment.get('text')}\n"
               f"他在下面评论：{comment_text}\n"

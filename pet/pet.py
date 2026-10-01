@@ -6,15 +6,12 @@
 这样两台进程不会各养一个"她"互相覆盖记忆。
 
 - 透明窗口、置顶（原生钩子 + 定期保活，见 _TopMostGuard）、可拖拽、双击立绘打开聊天
-- 大脑：remote_brain.RemoteBrain -> config.json 的 brain_remote（默认 http://127.0.0.1:18787）
+- 大脑：remote_brain.RemoteBrain -> config.json 的 brain_remote
 - 感知：watcher.ActivityWatcher，只读前台窗口标题 / 进程名，不截屏、不用视觉模型
-- 右键菜单：跟她聊天 / 置顶窗口 / 全屏时自动让开 / 设置 / 她的日记 / 主动说一句 / 清空记录 / 退出
-- 打游戏挡画面：右键取消「置顶窗口」，或勾上「全屏 / 打游戏时自动让开」让她自己躲
+- 右键菜单：聊天 / 置顶窗口 / 全屏时自动让开 / 设置 / 她的日记 / 主动说一句 / 清空 / 退出
 
-历史（别再往回加）：
-- 本地 4B 离线兜底模型 —— 2026-09-21 移除
-- 截屏 + 视觉模型"看你的屏幕" —— 2026-09-28 移除（隐私成本 + 老把屏幕上的字抄下来当话题）
-- 本地大脑兜底 + 局域网 HTTP 接口（mobile_server.py / 8787 端口）—— 2026-09-29 移除
+历史（别再往回加）：本地 4B 离线兜底、截屏 + 视觉模型"看你的屏幕"、
+本地大脑兜底 + 局域网 HTTP 接口，分别已移除。
 
 运行：F:/zhixia/venv/Scripts/python.exe pet.py
 """
@@ -25,9 +22,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "brain"))  # 云端大�
 
 
 # ---------- 单实例：同一时间只允许一个桌宠 ----------
-# 之前没有这层保护，看门狗拉起 / 开机自启 / 手动双击 run_pet.bat 任何入口都能再起一个，
-# 每个都建一套窗口（立绘+聊天窗+气泡），于是桌面叠了十几个。
-# 用 Windows 内核命名互斥量（跨进程、进程崩溃自动释放），第二个实例启动即退出。
+# 看门狗拉起 / 开机自启 / 手动双击，任何入口都能再起一个，每个都建一套窗口，
+# 于是桌面叠了十几个。用 Windows 命名互斥量跨进程兜住，第二个实例启动即退出。
 _INSTANCE_MUTEX = None
 
 
@@ -38,10 +34,8 @@ def ensure_single_instance(name="LinZhixiaPet"):
     try:
         import ctypes
         # 必须用 WinDLL(use_last_error=True) + ctypes.get_last_error()。
-        # 原来用 ctypes.windll.kernel32 再调 kernel32.GetLastError()：
-        # ctypes 自己的调用会把 LastError 冲掉，拿回来的几乎总是 0，
-        # 于是“已经有实例在跑”永远判断不出来 —— 单实例保护等于没写，
-        # 每双击一次就多一个她（2026-09-28 实测桌面上同时跑着两个）。
+        # 用 ctypes.windll 再调 kernel32.GetLastError() 的话，ctypes 自己的调用会把 LastError
+        # 冲掉，拿回来的几乎总是 0，"已经有实例在跑"永远判断不出来 —— 每双击一次就多一个她。
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         mutex = kernel32.CreateMutexW(None, False, "Global\\%sSingleInstance" % name)
         err = ctypes.get_last_error()
@@ -73,9 +67,7 @@ try:
 except Exception:
     CFG_PATH = r"F:\zhixia\brain\config\config.json"
 # 立绘实际放在 brain/assets/ 下（pet/assets/ 里从来没有过这些图）。
-# 2026-09-28 修：原来只认 pet/assets，三张图全读不到，桌宠窗口只能显示
-# 「立绘读不到」几个字 —— 这就是"桌宠打不开"的直接原因。
-# 两个位置都认，谁有图用谁的。
+# 只认一处的话三张图全读不到，窗口只显示「立绘读不到」几个字。两个位置都认。
 _ASSETS_SELF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 _ASSETS_BRAIN = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brain", "assets")
@@ -89,15 +81,12 @@ if os.path.exists(CFG_PATH):
 
 
 # ---------- 置顶保活（Windows 原生，见 _TopMostGuard） ----------
-# 为什么不能只靠 Qt 的 WindowStaysOnTopHint：
-#   1) 系统里**别的置顶窗口**（悬浮窗 / 桌面歌词 / 输入法候选框 / 游戏启动器）被点一下，
-#      就会升到置顶带更上面把她盖住。这时她自己的 WS_EX_TOPMOST 其实还在，
-#      Qt 对此一无所知、也不会主动抢回来 —— 表现就是"点一下别的软件她就被压住"。
-#   2) 个别多屏 / 驱动组合下，flags 不一定会立刻落到 z-order 上。
-# 所以两件事一起做（**只在她该置顶时生效**，用户选"沉底"时一律不插手）：
-#   · 定期 SetWindowPos(HWND_TOPMOST)：把她拎回置顶带最上面。已经是最上面时这个
-#     调用是空操作，Windows 内部直接返回，不重绘、不掉帧（0.8 秒一次）。
-#   · 原生事件过滤器拦 WM_WINDOWPOSCHANGING：谁想把她改成"非置顶"，当场改回去。
+# 不能只靠 Qt 的 WindowStaysOnTopHint：点一下别的置顶窗口（悬浮窗 / 桌面歌词 / 输入法
+# 候选框 / 游戏启动器）就会升到置顶带更上面把她盖住，而她自己的 WS_EX_TOPMOST 其实还在，
+# Qt 对此一无所知、也不会主动抢回来。
+# 所以两件事一起做，**只在她该置顶时生效**（用户选"沉底"时一律不插手）：
+#   · 定期 SetWindowPos(HWND_TOPMOST) 把她拎回置顶带最上面（已是最上面时是空操作）
+#   · 原生事件过滤器拦 WM_WINDOWPOSCHANGING，谁想把她改成"非置顶"就当场改回去
 WM_WINDOWPOSCHANGING = 0x0046
 GWL_EXSTYLE = -20
 WS_EX_TOPMOST = 0x00000008
@@ -254,9 +243,8 @@ class DiaryWorker(QThread):
 class Bubble(QWidget):
     """独立窗口的气泡。
 
-    原来是用 QLabel 当子控件放在立绘上方（负 y 坐标），但 Qt 会把子控件
-    裁剪到父窗口范围内，负坐标那段根本画不出来，所以气泡一直没显示过。
-    改成单独的顶层窗口就不受裁剪了。
+    原来用 QLabel 当子控件放在立绘上方（负 y 坐标），但 Qt 会把子控件裁剪到父窗口范围内，
+    负坐标那段根本画不出来 —— 气泡一直没显示过。改成单独的顶层窗口就不受裁剪了。
     """
 
     def __init__(self, on_top=True):
@@ -326,9 +314,8 @@ COLOR_ME = "#95ec69"
 def bubble_font():
     """气泡用的字体。
 
-    注意：字号必须用 setFont 设死，不能只写在样式表的 font-size 里 ——
-    样式表要等控件 polish 之后才生效，量宽度时拿到的是旧字体，
-    算出来的宽度会偏窄，短句就被折成竖条了。
+    字号必须用 setFont 设死，不能只写在样式表的 font-size 里：样式表要等控件 polish 之后
+    才生效，量宽度时拿到的是旧字体，算出来的宽度偏窄，短句会被折成竖条。
     """
     f = QFont("Microsoft YaHei UI", 10)
     f.setPixelSize(14)
@@ -411,8 +398,7 @@ class BubbleRow(QWidget):
     def _measure(label, text):
         """算气泡宽度：一句话放得下就贴合文字，放不下就固定到上限换行。
 
-        不用 QLabel 自己的 sizeHint —— 它对自动换行的标签算出的宽度会偏窄，
-        短句会被切成竖条。
+        不用 QLabel 自己的 sizeHint —— 它对自动换行的标签算出的宽度偏窄，短句会被切成竖条。
         """
         fm = QFontMetrics(label.font())
         longest = max((fm.horizontalAdvance(ln) for ln in text.split("\n")), default=0)
@@ -723,9 +709,8 @@ def _read_win_level(wcfg):
 def _pc_uptime_sec():
     """电脑已经开了多久（秒）。拿不到返回 None。
 
-    为什么要它：以前不管什么原因启动，她都开口说「刚打开电脑」——
-    可你电脑开了一整天、只是重启了一下桌宠，那句话听着就很假。
-    GetTickCount64 拿的是内核记的开机时长，不用装 psutil。
+    以前不管什么原因启动，她都开口说「刚打开电脑」—— 可你电脑开了一整天、只是重启了一下
+    桌宠，那句话听着就很假。GetTickCount64 拿的是内核记的开机时长，不用装 psutil。
     """
     try:
         import ctypes
@@ -748,9 +733,8 @@ def _human_min(m):
 def _startup_facts():
     """把「电脑开了多久 / 上次说话隔了多久」写成一句人话。
 
-    **只给事实，不给结论** —— 要不要开口、说什么，交给她自己判断。
-    写死"刚打开电脑"就是这么坏掉的：你电脑开了一整天、只是重启下桌宠，
-    她照样说刚打开电脑，一听就假。
+    **只给事实，不给结论** —— 要不要开口、说什么，交给她自己判断。写死"刚打开电脑"就是
+    这么坏掉的。
     """
     bits = []
     up = _pc_uptime_sec()
@@ -801,8 +785,7 @@ class PetWindow(QLabel):
         # ---- 窗口层级：两档（置顶开关），用户手动选，她自己不判断 ----
         #   "top"    压在所有窗口上面（置顶窗口=开）
         #   "bottom" 沉在所有窗口下面（置顶窗口=关，别的软件都能盖住她）
-        # 另外 sink_on_fullscreen 是"她自己判断全屏/游戏并让开"的开关，
-        # 默认关 —— 用户明确说不要她自己判断，想要手动控。
+        # sink_on_fullscreen 是"她自己判断全屏 / 游戏并让开"的开关，默认关。
         wcfg = api_config.get("window")
         wcfg = wcfg if isinstance(wcfg, dict) else {}
         self.win_level = _read_win_level(wcfg)
@@ -827,9 +810,8 @@ class PetWindow(QLabel):
         self.last_activity = ""      # 最近一次感知到的活动（给"主动搭话"当话题）
 
         # ---- 大脑只在云上：桌宠是纯客户端 ----
-        # 本地兜底大脑（brain_remote 为空时在自己电脑上养一个"她"）已于 2026-09-29 摘掉：
-        # 两台进程各养一个她只会互相覆盖记忆，而且本地兜底从来没真正救过场
-        # （隧道断的时候，本地那份记忆跟云上已经分叉了，聊起来更像"另一个人"）。
+        # 本地兜底大脑已摘掉：两台进程各养一个她只会互相覆盖记忆，而且本地那份记忆跟云上
+        # 早早分叉了，聊起来更像"另一个人"。
         self._remote_base = str(api_config.get("brain_remote") or "").strip()
         if not self._remote_base:
             raise RuntimeError("config.json 里没配 brain_remote")
@@ -1202,7 +1184,7 @@ class PetWindow(QLabel):
     def proactive_now(self):
         """手动让她主动说一句（测试用，也方便想听她说点啥）。
 
-        用最近一次感知到的活动当话题；如果还没感知到，就随便开个头。
+        用最近一次感知到的活动当话题；还没感知到就随便开个头。
         """
         what = getattr(self, "last_activity", "") or "在发呆"
         self._on_activity({"what": what, "detail": "", "mood": "",
@@ -1243,9 +1225,8 @@ class PetWindow(QLabel):
     def _apply_level(self, level):
         """真正切换层级。
 
-        坑：setWindowFlags 会让系统把窗口隐藏 / 重建，位置和可见性都得自己兜回来。
-        所以先存坐标、切完再 move 回来 + show；base_y 也要更新 ——
-        不然呼吸动画会拿旧坐标把她拽回去。
+        坑：setWindowFlags 会让系统把窗口隐藏 / 重建，位置和可见性都得自己兜回来 ——
+        先存坐标、切完再 move 回来 + show；base_y 也要更新，不然呼吸动画会拿旧坐标把她拽回去。
         """
         if level not in WIN_LEVELS:
             level = "bottom"
@@ -1269,9 +1250,8 @@ class PetWindow(QLabel):
     def _sync_win32_zorder(self, level):
         """再补一刀 SetWindowPos。
 
-        Qt 的 flags 已经会加上/清掉 WS_EX_TOPMOST，这里只是兜底：
-        个别多屏 / 驱动环境下 flags 不一定立刻反映到 z-order。
-        沉底用 HWND_BOTTOM —— 光靠 Qt 的 StaysOnBottomHint 有时压不住。
+        Qt 的 flags 已经会加上 / 清掉 WS_EX_TOPMOST，这里只是兜底：个别多屏 / 驱动环境下 flags
+        不一定立刻反映到 z-order。沉底用 HWND_BOTTOM —— 光靠 Qt 的 StaysOnBottomHint 有时压不住。
         """
         if _user32 is None:
             return
@@ -1293,8 +1273,7 @@ class PetWindow(QLabel):
     def topmost_hwnds(self):
         """当前需要保持"置顶带最上面"的窗口句柄（立绘 + 气泡）。
 
-        只在她该置顶时返回句柄；用户选了"沉底"就返回空 ——
-        这样保活逻辑绝不会把用户自己选的层级顶掉。
+        只在她该置顶时返回句柄；用户选了"沉底"就返回空 —— 保活逻辑绝不会把用户选的层级顶掉。
         """
         if _user32 is None or self._level != "top":
             return ()
@@ -1315,8 +1294,8 @@ class PetWindow(QLabel):
     def enforce_topmost(self):
         """把她（和气泡）拎回置顶带最上面。
 
-        已经是置顶带最上面时 SetWindowPos 是空操作（Windows 内部直接返回，
-        不重绘、不掉帧），所以可以放心地每隔几百毫秒调一次。
+        已经是最上面时 SetWindowPos 是空操作（Windows 内部直接返回，不重绘、不掉帧），
+        所以可以放心地每隔几百毫秒调一次。
         """
         for h in self.topmost_hwnds():
             try:
@@ -1380,9 +1359,7 @@ class PetWindow(QLabel):
 
     def _on_game_state(self, d):
         """前台切成游戏 / 全屏了 —— 只在用户开了"自动让位"时才动。
-
-        默认关：用户明确说不要她自己判断，想要手动控层级。
-        """
+        默认关：用户要手动控层级，不要她自己判断。"""
         playing = bool(d.get("playing"))
         fullscreen = bool(d.get("fullscreen"))
         blocking = playing or fullscreen
@@ -1411,7 +1388,7 @@ class PetWindow(QLabel):
         SettingsDialog(self, api_config).exec()
 
     def apply_settings(self):
-        """设置保存后热更新：人设 + 主动搭话策略 + 本地兜底模型。不用重启。"""
+        """设置保存后热更新：人设 + 主动搭话策略 + 窗口层级。不用重启。"""
         try:
             self.brain.reload_persona()
             print("[设置] 人设已热更新", flush=True)
@@ -1440,10 +1417,9 @@ class PetWindow(QLabel):
     def _startup_greet(self):
         """她一启动，自己先开个口（可在设置里关）。
 
-        **刻意不替她决定要不要说话。** 以前写死一句「刚打开电脑」，
-        所以你电脑开了一整天、只是重启一下桌宠，她也说刚打开电脑 —— 一听就假。
-        现在只把事实递给她（电脑开了多久、上次说话隔了多久），
-        开不开口、说什么，她自己拿主意；她觉得没什么好说的就回「无」，不会打扰你。
+        **刻意不替她决定要不要说话。** 写死一句「刚打开电脑」的话，你电脑开了一整天、只是
+        重启一下桌宠，她也说刚打开电脑，一听就假。现在只把事实递给她（电脑开了多久、上次
+        说话隔了多久），开不开口、说什么由她自己拿主意；她觉得没什么好说的就回「无」。
         """
         pro = api_config.get("proactive") or {}
         if not pro.get("on_startup", True) or not self.ready:
@@ -1534,9 +1510,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     app = QApplication(sys.argv)
-    # 立绘是 Qt::Tool 窗口，Qt 不把它算进"主窗口"；聊天窗才是普通主窗口。
-    # 所以一关聊天窗，Qt 就以为最后一个窗口关了 -> 整个程序退出，立绘跟着没。
-    # 这里关掉自动退出：程序只允许通过右键「退出」结束。
+    # 立绘是 Qt::Tool 窗口，Qt 不把它算进"主窗口"，聊天窗才是普通主窗口。所以一关聊天
+    # 窗，Qt 就以为最后一个窗口关了 -> 整个程序退出、立绘跟着没。这里关掉自动退出：
+    # 程序只允许通过右键「退出」结束。
     app.setQuitOnLastWindowClosed(False)
     pet = PetWindow()
     pet.show()
