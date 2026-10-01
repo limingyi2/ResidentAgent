@@ -175,3 +175,7 @@ python pet/pet.py
 > **开发说明（如实标注）**：本项目代码主体在 AI 辅助下完成；作者负责需求拆解、结构设计、部署上线、线上故障定位与数据治理。
 >
 > **安全说明**：仓库内不含 API key、服务器地址、鉴权 token 与私钥。部署前请按 `brain/config/config.example.json` 自建 `config.json`，并在客户端设置页填写服务地址与 token。
+
+## 许可
+
+MIT，见 [LICENSE](LICENSE)。
