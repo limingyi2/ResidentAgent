@@ -8,7 +8,7 @@
 > 记忆跨会话累积、三个客户端随时接入都是同一个人格的进程。
 > 内置角色代号「角色」，她的人格由人设文件定义，支持热重载切换 —— **角色名不是项目名**。
 
-**技术栈**：Python 3.12（`httpx` / `fastembed`+bge-m3 / `numpy` / `Pillow`）· PyQt6 · Android（WebView 单页 + 原生轮询服务）· LLM 走 OpenAI 兼容接口（SiliconFlow 等，可在设置里换服务商与模型）
+**技术栈**：Python 3.12（`httpx` / `fastembed`+bge-m3 / `numpy` / `Pillow`）· PyQt6 · Android（WebView 单页 + 原生轮询服务）· LLM 走 OpenAI 兼容接口（SiliconFlow 等，可在设置里换服务商与模型）· 语音走阿里云百炼（`qwen-audio-3.1-tts-flash`，音色由参考音频零样本复刻而来）
 
 ---
 
@@ -39,7 +39,7 @@
 | `brain/life_engine.py` | 她自己的生活推演与夜间日记 |
 | `brain/moments.py` | 朋友圈 |
 | `brain/vision.py` | 图片视觉描述（云端 VL 模型转成一句话） |
-| `brain/voice.py` | 语音合成：她想用声音说时发语音条（CosyVoice2-0.5B，音色见 config 的 voice 段） |
+| `brain/voice.py` | 语音合成：她想用声音说时发语音条。当前平台**阿里云百炼 Qwen-Audio-3.1**（音色为参考音频复刻），旧平台硅基流动保留为兜底；音色清单与热切换见 `config` 的 `voice` 段与 `/api/voices` |
 | `brain/persona_store.py` | 人设系统：白名单字段 + 全局身份底线，支持热重载 |
 | `brain/model_hub.py` | 模型中枢：拉取模型列表并按对话 / 看图 / 生图 / 语音分类 |
 | `brain/errlog.py` | 前后端错误日志，客户端可上报与导出 |
@@ -83,7 +83,7 @@ python pet/pet.py
 │   ├── agenda.py        约定账本：带日期的约定按时间窗强制带，到点自己想起来
 │   ├── moments.py       朋友圈      stickers.py   表情包
 │   ├── vision.py        图片视觉描述（云端 VL）
-│   ├── voice.py         语音合成：她发语音条（模型/音色写在 config 的 voice 段）
+│   ├── voice.py         语音合成：她发语音条（平台/模型/音色写在 config 的 voice 段，App 里可一键换）
 │   ├── life_engine.py   她自己的生活 + 日记
 │   ├── worldgen.py      世界设定生成
 │   ├── persona_store.py 人设
@@ -156,6 +156,16 @@ python pet/pet.py
 
 工具调用、长期记忆、自主行为与护栏的设计细节，以及实现过程中踩过的坑、
 故意没这么做的取舍、实测数据和已知不足，都在 [`docs/设计与取舍.md`](docs/设计与取舍.md)。
+
+`docs\` 下其余文档：
+
+| 文档 | 内容 |
+|---|---|
+| [`设计与取舍.md`](docs/设计与取舍.md) | 能力构成、踩过的坑、实测数据、已知不足 |
+| [`语音平台成本对比.md`](docs/语音平台成本对比.md) | 腾讯 / 阿里 / 火山 / 硅基 / MiniMax 等平台月成本换算过程、两个容易看错的计费口径 |
+| [`游戏内录音取样指南.md`](docs/游戏内录音取样指南.md) | 想给她换个游戏角色音色时，怎么录、录什么、哪些角色公开数据集里根本没有 |
+| [`记忆与上下文改造说明.md`](docs/记忆与上下文改造说明.md) | 三层记忆（事实 / 话题回顾 / 约定账本）的来由 |
+| [`时间感与主动性修复.md`](docs/时间感与主动性修复.md) | 相对时间污染记忆、主动搭话重复这两类问题的修复记录 |
 
 ---
 

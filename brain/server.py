@@ -90,8 +90,16 @@ BRAIN_TOKEN = str(api_config.get("brain_token") or MOB_CFG.get("token") or "")
 # 坑（2026-09-28 修）：这里以前只拷了三个键，没拷 vision —— 结果 vision.py
 # 拿不到 vision.model，一直在用代码里的默认 8B 模型，config 里配的 30B 从来
 # 没生效过。改模型时"看图模型"看着改了其实没变，就是漏了这一行。
+#
+# 坑（2026-10-01 修，同一个坑的第二次）：加"语音"键时才发现的 ——
+# 这份拷贝**一直没有 voice**，而 resolve_voice_tag() 把 API_CFG 传给了
+# voice.synth()。synth 读不到 cfg["voice"] 就整套走默认值，所以云端
+# config.json 里 voice 段写什么都**从来没生效过**（一直碰巧和默认的 diana
+# 一致，所以没人发现）。App 一键换音色必须先把这一行补上，
+# 否则换了声音她还是用旧的 —— 跟 2026-09-22 人设切换踩的是一模一样的坑。
+# 以后往 config 加新的功能段，**记得同步这里**，别再漏第三个。
 API_CFG = {k: api_config[k] for k in
-           ("api_base", "api_key", "model", "vision")
+           ("api_base", "api_key", "model", "vision", "voice")
            if k in api_config}
 
 IMG_TAG_RE = re.compile(r"^\s*\[img[:：]\s*([^\]]+?)\]\s*$")
@@ -1424,6 +1432,87 @@ def start_remote_api(brain):
                         self._json(200, {"ok": True, "name": her})
                     except Exception as e:
                         self._json(200, {"ok": False, "err": str(e)[:80]})
+                elif path == "/api/voice/apply":
+                    # App 一键换声音（2026-10-01 加，用户要求"能不能在 App 里快速换"）。
+                    # 与人设切换同构，但**有两处内存要同步**：
+                    #   1) api_config —— 落盘的那份，下次启动读它；
+                    #   2) API_CFG     —— voice.synth() 实际收到的是这个对象，
+                    #      它只是启动时从 api_config 拷出来的**浅拷贝**，
+                    #      改 api_config 不会带着它变（这就是 09-28 vision 那个坑）。
+                    # 只改一处都会出现"看着换了、声音没变"。
+                    try:
+                        key = os.path.basename(str(body.get("key") or ""))
+                        import voice
+                        sub, desc = voice.apply(api_config, key)
+                        if not sub:
+                            self._json(200, {"ok": False,
+                                             "err": "没有这个声音"})
+                            return
+                        try:
+                            from paths import CONFIG_DIR
+                            cfg_path = os.path.join(str(CONFIG_DIR),
+                                                    "config.json")
+                        except Exception:
+                            cfg_path = os.path.join(
+                                os.path.dirname(os.path.abspath(__file__)),
+                                "config", "config.json")
+                        cfg = {}
+                        try:
+                            cfg = json.load(open(cfg_path, encoding="utf-8"))
+                        except Exception:
+                            cfg = {}
+                        cfg["voice"] = sub
+                        # 老配置备份一次就够，别每次点都盖一遍（盖了就没法回头）
+                        bak = cfg_path + ".bak_voice"
+                        if not os.path.exists(bak):
+                            try:
+                                import shutil
+                                shutil.copyfile(cfg_path, bak)
+                            except Exception:
+                                pass
+                        with open(cfg_path, "w", encoding="utf-8") as f:
+                            json.dump(cfg, f, ensure_ascii=False, indent=2)
+                        api_config["voice"] = sub
+                        API_CFG["voice"] = sub
+                        # 换音色不用重启、不用重建 Brain：synth() 每次都现读配置。
+                        # 但**语音缓存按 (文本, 模型, 音色) 做 key**（voice._cache_path），
+                        # 所以换完不会串音、也不会白花钱重合成 —— 两句一样的旧语音
+                        # 会各存一份，这是刻意的。
+                        print(f"[大脑] 声音已切换为 {desc}（API_CFG 已同步）",
+                              flush=True)
+                        self._json(200, {"ok": True, "key": key, "desc": desc,
+                                         "voice": voice.describe(API_CFG)})
+                    except Exception as e:
+                        errlog.log_exc("api/voice/apply", e)
+                        self._json(200, {"ok": False, "err": str(e)[:80]})
+                elif path == "/api/voice/preview":
+                    # 试听某个音色（App 列表里点"试听"）。合成完**不切换**——
+                    # 关键就在这儿：必须用一份**临时配置**去合成，绝不能顺手
+                    # 改了全局 api_config / API_CFG，否则"试听"会变成"直接换掉她的声音"。
+                    # 同一句 + 同一音色的结果会被 voice.synth 缓存（key 含音色），
+                    # 所以反复试听同一个不重复花钱。
+                    try:
+                        key = os.path.basename(str(body.get("key") or ""))
+                        import voice
+                        sub, desc = voice.apply(api_config, key)
+                        if not sub:
+                            self._json(200, {"ok": False,
+                                             "err": "没有这个声音"})
+                            return
+                        tmp = dict(API_CFG)
+                        tmp["voice"] = sub
+                        text = (str(body.get("text") or "").strip()
+                                or voice.PREVIEW_TEXT)
+                        name = voice.synth(text, tmp)
+                        if not name:
+                            self._json(200, {"ok": False,
+                                             "err": "合成失败（余额或网络）"})
+                            return
+                        self._json(200, {"ok": True, "name": name,
+                                         "text": text, "desc": desc})
+                    except Exception as e:
+                        errlog.log_exc("api/voice/preview", e)
+                        self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/models/apply":
                     # App 换模型：写 config.json **并且** 同步内存。
                     # 只写盘是没用的 —— Brain 拿的是启动时 load_config() 那一份
@@ -1566,6 +1655,28 @@ def start_remote_api(brain):
                 except Exception:
                     pass
                 self._json(200, {"name": name, "key": cur, "presets": presets})
+            elif path == "/api/voices":
+                # App 设置页「她的声音」：有哪些能选、现在是哪个。
+                # 清单是 voice.VOICE_CATALOG 里的死数据，**不联网**——
+                # 设置页必须永远打得开，不能因为平台抖动就变成一片空白。
+                try:
+                    import voice
+                    # 扫一眼缓存目录，让 App 能顺手看到"这个声音攒了几条语音"
+                    # （不精确，只用来判断要不要清缓存，别当业务数据用）
+                    try:
+                        n_cache = len([f for f in os.listdir(voice.VOICE_DIR)
+                                       if f.startswith("v_")])
+                    except Exception:
+                        n_cache = 0
+                    d = voice.catalog(API_CFG)
+                    d["ok"] = True
+                    d["cache_files"] = n_cache
+                    d["current_desc"] = voice.describe(API_CFG)
+                    self._json(200, d)
+                except Exception as e:
+                    errlog.log_exc("api/voices", e)
+                    self._json(200, {"ok": False, "err": str(e)[:120],
+                                     "current": "", "items": []})
             elif path == "/api/models":
                 # App「模型」页要的三样：服务商列表 / 分类好的模型清单 / 现在用哪个。
                 # force=1 = 用户点了"重新拉取"，不用缓存（换 key 之后必须这样拉一次）
@@ -1690,8 +1801,15 @@ def start_remote_api(brain):
                 except OSError:
                     self._json(404, {"err": "read fail"})
                     return
+                # 后缀 → MIME。2026-10-01 换阿里后**输出格式不再固定是 mp3**
+                # （阿里那条线的 format 可配，wav/opus 都是合法值，
+                #  voice._ext_of 决定落地后缀），写死 audio/mpeg 会让 wav 播不出来。
+                _ct = {".wav": "audio/wav", ".mp3": "audio/mpeg",
+                       ".opus": "audio/ogg", ".ogg": "audio/ogg"}
                 self.send_response(200)
-                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Type",
+                                 _ct.get(os.path.splitext(p)[1].lower(),
+                                         "application/octet-stream"))
                 self.send_header("Content-Length", str(len(blob)))
                 self.end_headers()
                 self.wfile.write(blob)
