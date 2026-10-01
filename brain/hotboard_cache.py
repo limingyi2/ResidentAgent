@@ -15,6 +15,21 @@ MAX_AGE = 6 * 3600
 KEEP = 10               # 缓存里留 10 条，注入提示词时取前 5
 
 
+def _slot():
+    """以本地零点起算的 6 小时槽位（0/6/12/18 点整换槽）。"""
+    lt = time.localtime()
+    return "%s#%d" % (time.strftime("%Y-%m-%d", lt), lt.tm_hour // 6)
+
+
+def should_refresh():
+    """进新槽位才刷：从今天零点起每 6 小时一次（0/6/12/18 点）。"""
+    try:
+        return _slot() != str(json.load(io.open(_CACHE, encoding="utf-8"))
+                              .get("slot") or "")
+    except Exception:
+        return True
+
+
 def refresh(platform, token):
     import uapi
     lst = uapi.fetch_hotboard(platform, token)
@@ -22,7 +37,7 @@ def refresh(platform, token):
         return False
     tmp = _CACHE + ".new"
     with io.open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        json.dump({"t": time.time(), "platform": platform,
+        json.dump({"t": time.time(), "slot": _slot(), "platform": platform,
                    "titles": [str(x.get("title") or "") for x in lst[:KEEP]]},
                   f, ensure_ascii=False)
     os.replace(tmp, _CACHE)

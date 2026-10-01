@@ -266,5 +266,78 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        /** 表情包/图片保存：存进相册「角色」目录。图片字节由页面传 base64 过来。
+         * Android 10+ 走 MediaStore 免权限；老机器退到 App 私有目录。 */
+        @JavascriptInterface
+        public void saveImage(String name, String b64) {
+            String n = (name == null || name.trim().isEmpty())
+                    ? ("zhixia_" + System.currentTimeMillis() + ".jpg") : name.trim();
+            String msg;
+            try {
+                byte[] data = Base64.decode(b64 == null ? "" : b64, Base64.NO_WRAP);
+                if (data.length == 0) throw new Exception("图是空的");
+                if (Build.VERSION.SDK_INT >= 29) {
+                    android.content.ContentValues cv = new android.content.ContentValues();
+                    cv.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, n);
+                    cv.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                    cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/角色");
+                    cv.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
+                    Uri uri = getContentResolver().insert(
+                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+                    if (uri == null) throw new Exception("写不进相册");
+                    OutputStream os = getContentResolver().openOutputStream(uri);
+                    if (os == null) throw new Exception("打不开输出流");
+                    os.write(data);
+                    os.flush();
+                    os.close();
+                    cv.clear();
+                    cv.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
+                    getContentResolver().update(uri, cv, null, null);
+                    msg = "已保存到相册「角色」";
+                } else {
+                    File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
+                    if (dir != null && !dir.exists()) dir.mkdirs();
+                    File f = new File(dir, n);
+                    FileOutputStream fos = new FileOutputStream(f);
+                    fos.write(data);
+                    fos.flush();
+                    fos.close();
+                    msg = "已保存到 " + f.getAbsolutePath();
+                }
+            } catch (Exception e) {
+                msg = "保存失败：" + e.getMessage();
+            }
+            final String m = msg;
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, m,
+                    Toast.LENGTH_LONG).show());
+        }
+
+        /** 删除之前保存的那张图。只能删本 App 自己写进相册的（MediaStore 按
+         * 文件名 + 目录查），别人 App 的图系统会拒，删不动就提示。 */
+        @JavascriptInterface
+        public void deleteImage(String name) {
+            String n = (name == null || name.trim().isEmpty()) ? "" : name.trim();
+            String msg;
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    String sel = android.provider.MediaStore.Images.Media.DISPLAY_NAME
+                            + "=? AND " + android.provider.MediaStore.Images.Media.RELATIVE_PATH + "=?";
+                    int k = getContentResolver().delete(
+                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            sel, new String[]{n, "Pictures/角色/"});
+                    msg = k > 0 ? "已删除：" + n : "相册里没找到这张（可能已经删了）";
+                } else {
+                    File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
+                    File f = dir == null ? null : new File(dir, n);
+                    msg = (f != null && f.exists() && f.delete())
+                            ? "已删除：" + n : "没找到这张图";
+                }
+            } catch (Exception e) {
+                msg = "删除失败：" + e.getMessage();
+            }
+            final String m = msg;
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, m,
+                    Toast.LENGTH_LONG).show());
+        }
     }
 }

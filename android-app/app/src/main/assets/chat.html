@@ -102,6 +102,14 @@ body.notab .page { bottom:0; }
 .setrow .lab { width:88px; font-size:15px; flex:none; }
 .setrow input { flex:1; border:none; outline:none; font-size:14px; background:transparent; min-width:0; }
 .hint { font-size:11.5px; color:#b2b2b2; padding:7px 14px; line-height:1.5; }
+/* ---- 功能开关 ---- */
+.featrow { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#fff; border-bottom:0.5px solid #f0f0f0; }
+.featlab { font-size:14.5px; color:#191919; }
+.featdesc { font-size:11.5px; color:#b2b2b2; margin-top:2px; }
+.fsw { width:44px; height:26px; border-radius:13px; background:#ddd; position:relative; transition:background .2s; flex:none; }
+.fsw.on { background:#07c160; }
+.fsw::after { content:''; position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:#fff; transition:left .2s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+.fsw.on::after { left:20px; }
 /* ---- 模型页 / 日志页 ---- */
 .setrow select { flex:1; border:none; outline:none; font-size:14px; background:transparent; min-width:0; color:#191919; appearance:none; -webkit-appearance:none; }
 .setrow select:disabled { color:#b2b2b2; }
@@ -281,6 +289,11 @@ body.notab .page { bottom:0; }
       <div class="setrow" onclick="pick('bg')"><div class="lab">聊天背景</div><input readonly placeholder="相册选图"><span class="arrow">›</span></div>
     </div>
     <div class="grp">
+      <div class="setrow"><div class="lab">功能开关</div><input readonly placeholder="她能用的附加功能"></div>
+      <div id="featList"><div class="hint" style="padding:10px 14px">加载中…</div></div>
+      <div class="hint">关掉的功能她就不聊/不提醒了，对性格、记忆、聊天记录没影响。</div>
+    </div>
+    <div class="grp">
       <div class="setrow"><div class="lab">地址</div><input id="baseIn" placeholder="http://…"></div>
       <div class="setrow"><div class="lab">口令</div><input id="tokenIn" placeholder="token"></div>
       <div class="hint">一般不用改。连接异常时先点「测试连接」。</div>
@@ -394,7 +407,7 @@ body.notab .page { bottom:0; }
 /* --- 基础 --- */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 19;   // 19 = 回复按她的换行拆成多条气泡连发；18 = 语音条不再重复显示文字；17 = 设置页一键换声音
+const APP_CODE  = 20;   // 20 = 长按图片存相册（已存可删）+ 设置页功能开关 + 修回复双份；19 = 回复拆多条气泡连发；18 = 语音条不再重复显示文字
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
@@ -618,6 +631,7 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
       im.onload = () => scrollBottom();    // 同上：图加载完再贴一次底
       im.onerror = () => scrollBottom();
       im.onclick = () => view(im.src);
+      addLongPress(im, () => imgMenu(m[1].trim(), im.src));   // 长按：保存/删除
       bub.appendChild(im);
       idx = re.lastIndex;
     }
@@ -680,6 +694,62 @@ function copyText(s) {
 }
 let histSig = '';
 let msgNodes = [];                  // [{key, els}] —— 增量渲染时用来删掉滑出窗口的旧消息
+let optEls = [];                    // 刚发出去的"乐观气泡"（本地先画的，服务端历史一到就摘掉）
+
+/* --- 长按图片：保存到相册 / 已保存过的删除 ---
+   保存记录存 localStorage（zx_saved，存文件名）；真正的文件在 Android 端
+   写进相册「角色」目录（MediaStore，免存储权限），删除也走 Android 端。 */
+function savedImgs() { try { return JSON.parse(localStorage.getItem('zx_saved') || '[]'); } catch (e) { return []; } }
+function markSaved(name, on) {
+  const a = savedImgs().filter(x => x !== name);
+  if (on) a.push(name);
+  localStorage.setItem('zx_saved', JSON.stringify(a));
+}
+function addLongPress(el, fn) {
+  let tmr = null;
+  el.addEventListener('touchstart', () => { tmr = setTimeout(fn, 550); }, { passive: true });
+  el.addEventListener('touchend', () => clearTimeout(tmr));
+  el.addEventListener('touchmove', () => clearTimeout(tmr));
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); fn(); });
+}
+function imgMenu(name, src) {
+  const saved = savedImgs().indexOf(name) >= 0;
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-end;';
+  const sheet = document.createElement('div');
+  sheet.style.cssText = 'background:#fff;border-radius:14px 14px 0 0;width:100%;padding:6px 0 16px;';
+  function act(label, color, fn) {
+    const b = document.createElement('div');
+    b.style.cssText = 'padding:14px;text-align:center;font-size:15.5px;color:' + color + ';border-bottom:1px solid #f2f2f2;';
+    b.textContent = label;
+    b.onclick = () => { ov.remove(); if (fn) fn(); };
+    sheet.appendChild(b);
+  }
+  act(saved ? '删除这张图（相册里的）' : '保存到手机相册', saved ? '#fa5151' : '#191919', async () => {
+    if (saved) {
+      if (window.Android && window.Android.deleteImage) { try { window.Android.deleteImage(name); } catch (e) {} }
+      else tip('只有 App 里能删');
+      markSaved(name, false);
+    } else {
+      try {
+        tip('保存中…');
+        const r = await fetch(src);
+        const fr = new FileReader();
+        fr.onload = () => {
+          if (window.Android && window.Android.saveImage) {
+            try { window.Android.saveImage(name, String(fr.result).split(',')[1] || ''); } catch (e) {}
+            markSaved(name, true);
+          } else tip('只有 App 里能保存');
+        };
+        fr.readAsDataURL(await r.blob());
+      } catch (e) { tip('图没取下来'); }
+    }
+  });
+  act('取消', '#888', null);
+  ov.appendChild(sheet);
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+}
 function keyOf(it) {
   return (it.t || '') + '|' + (it.role || '') + '|' + (it.text || '') + '|' + (it.img || '');
 }
@@ -736,6 +806,10 @@ async function loadHistory(manual) {
       const b = $('list');
       const nearBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
       histSig = sig;
+      // 乐观气泡（本地先画的）到这里退役：服务端历史才是唯一真源。
+      // 不摘的话历史一到再画一遍，整轮消息双份（03:27 截图那个 bug 的根因）
+      optEls.forEach(el => { try { el.remove(); } catch (e) {} });
+      optEls = [];
       updateHistory(items);                 // 优先增量；算不出来才整列表重绘
       if (nearBottom || manual) scrollBottom(true);   // force：进页面/本来就在底部就吸死
       settlePin();                          // 图片加载期间持续补贴底
@@ -759,7 +833,10 @@ async function sendText(t, img) {
       // 条与条之间歇一下，间隔随上一条的长度微增，像真人一条条打出来
       if (i) await new Promise(res => setTimeout(res, Math.min(350 + (parts[i-1] || '').length * 25, 900)));
       addMsg('assistant', parts[i], i === 0 ? (d.t || '') : '');
+      optEls.push(..._newNodes);
     }
+    // 立刻对一次服务端历史：乐观气泡被摘掉、换成存档版，重开 App 也不会错位
+    loadHistory(true);
   } catch (e) {
     addMsg('assistant', '', '');
     tip('连不上她：去 我-设置-测试连接 看具体原因', 4000);
@@ -772,6 +849,7 @@ async function sendMsg() {
   const img = pendingImg; cancelImg();
   $('input').value = '';
   addMsg('user', t, nowStr(), img, true);
+  optEls.push(..._newNodes);
   sendText(t, img);
 }
 $('sendBtn').onclick = sendMsg;
@@ -1316,7 +1394,7 @@ async function clearLog() {
 }
 
 /* --- 设置 / 更新 --- */
-function openSettings() { $('baseIn').value = BASE; $('tokenIn').value = TOKEN; $('connResult').textContent = ''; openPage('settings'); }
+function openSettings() { $('baseIn').value = BASE; $('tokenIn').value = TOKEN; $('connResult').textContent = ''; openPage('settings'); loadFeatures(); }
 function openProfile() { renderAvatars(); openPage('profile'); }
 function openStk() { switchTab('wx'); openPage('chat'); $('stkPanel').style.display = 'flex'; loadStickers(); }
 function openMoments() { openPage('moments'); }
@@ -1337,6 +1415,46 @@ async function testConn() {
     const d = await r.json();
     el.textContent = '✓ 连接正常（' + (d.name || '?') + '，' + (Date.now() - t0) + 'ms）';
   } catch (e) { el.textContent = '✗ 连不上：' + (e.message || e); }
+}
+/* --- 功能开关：服务端 config.features 是唯一真源，这里只是远程的开关面板 --- */
+const FEAT_NAMES = [
+  ['hotboard', '热搜', '她能看到你那边刷到的热搜'],
+  ['weather', '天气', '她知道你那边现在的天气'],
+  ['weather_alert', '天气提醒', '下雨/降温/高温她会主动关心你'],
+  ['packages', '快递提醒', '发快递单号她就帮你盯，有进展主动说'],
+  ['rand_img_chat', '聊天趣图', '她可以甩表情包、趣图、风景图'],
+  ['rand_img_moment', '朋友圈随机配图', '朋友圈优先用现成图，不再都现画'],
+];
+async function loadFeatures() {
+  let feats = {};
+  try {
+    const r = await fetch(api('/api/features'));
+    feats = (await r.json()).features || {};
+  } catch (e) {}
+  const box = $('featList'); box.innerHTML = '';
+  FEAT_NAMES.forEach(([k, name, desc]) => {
+    const row = document.createElement('div'); row.className = 'featrow';
+    const left = document.createElement('div');
+    left.innerHTML = '<div class="featlab">' + name + '</div><div class="featdesc">' + desc + '</div>';
+    const sw = document.createElement('div');
+    sw.className = 'fsw' + (feats[k] !== false ? ' on' : '');
+    sw.onclick = () => toggleFeat(k, sw);
+    row.appendChild(left); row.appendChild(sw);
+    box.appendChild(row);
+  });
+}
+async function toggleFeat(k, sw) {
+  const to = sw.className.indexOf('on') < 0;
+  sw.className = 'fsw' + (to ? ' on' : '');
+  try {
+    const r = await fetch(api('/api/features'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [k]: to })
+    });
+    const d = await r.json();
+    sw.className = 'fsw' + (((d.features || {})[k] !== false) ? ' on' : '');
+    tip(to ? '已打开' : '已关闭');
+  } catch (e) { sw.className = 'fsw' + (to ? '' : ' on'); tip('没改成，连不上她'); }
 }
 let updUrl = '';
 function showUpdDlg(name, url) { updUrl = url; $('updName').textContent = name; $('updDlg').style.display = 'flex'; }

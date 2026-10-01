@@ -212,6 +212,62 @@ def resolve_gen_tags(text, look=""):
     return GEN_TAG_RE.sub(_sub, (text or ""))
 
 
+# --- 随机图（UAPI 图库）：她甩表情包 / 朋友圈配图都用它 ---
+
+RAND_TAG_RE = re.compile(r"\[rand[:：]\s*([^\]]+?)\s*\]")
+# 她能主动甩的分类。furry 图库存在但**永远不发**（用户明令屏蔽）；
+# 壁纸类只在他说了"壁纸"时才给 —— 没点名就当没这个类
+_RAND_OK = ("bq", "acg", "landscape", "anime", "general_anime", "ai_drawing")
+_RAND_WALLPAPER = ("pc_wallpaper", "mobile_wallpaper")
+
+
+def _cloud_random_image(category):
+    """从 UAPI 图库拉一张图存进 upload，返回文件名；失败返回空串。"""
+    try:
+        import uapi
+        data = uapi.fetch_random_image(
+            category, (API_CFG.get("uapi") or {}).get("token") or "")
+        if not data:
+            return ""
+        from paths import UPLOAD_DIR
+        d = str(UPLOAD_DIR)
+        os.makedirs(d, exist_ok=True)
+        name = "rand_%s_%s.jpg" % (time.strftime("%Y%m%d_%H%M%S"),
+                                   "".join(random.choice("0123456789abcdef")
+                                           for _ in range(4)))
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(data)
+        return name
+    except Exception:
+        return ""
+
+
+def resolve_rand_tags(text, user_text=""):
+    """[rand:分类] → 从图库拉一张现成图，换成 [img:文件名]。
+
+    分类不在册 / 功能开关关了 / 图拉不到，都把标签删干净，原文绝不能漏给用户。
+    模型会把标签写成 [img:rand:bq] 这种嵌套变体，先归一化再解析。
+    """
+    text = re.sub(r"\[img[:：]\s*rand[:：]\s*([^\]]+?)\s*\]", r"[rand:\1]",
+                  (text or ""))
+    def _sub(m):
+        cat = (m.group(1) or "").strip().lower()
+        if cat in _RAND_WALLPAPER:
+            if "壁纸" not in (user_text or ""):
+                return ""
+        elif cat not in _RAND_OK:
+            return ""
+        try:
+            import features
+            if not features.on("rand_img_chat"):
+                return ""
+        except Exception:
+            pass
+        n = _cloud_random_image(cat)
+        return ("[img:%s]" % n) if n else ""
+    return RAND_TAG_RE.sub(_sub, (text or ""))
+
+
 # --- 自拍 ---
 # 认出"他想要她本人的照片"就直接生成、不问模型：让她自己决定的话，她常常只在
 # 正文里用第三人称描述画面却不真发图。正文用固定短句，保证第一人称、没有 AI 腔。
@@ -589,6 +645,8 @@ def ask_with_retry(text, img_b64=None):
             except Exception:
                 look = ""
             ans = resolve_gen_tags(strip_say_marker(ans), look)
+            # [rand:分类] 是她甩表情包/趣图的路子；壁纸类只有他点名才给
+            ans = resolve_rand_tags(ans, text)
             # 她加了 [voice] 就合成真语音条（失败自动降级成纯文字）
             ans = resolve_voice_tag(ans, API_CFG)
             # 存档记的是处理后的正文（带 [img:gen_xxx.png]，App 能直接显示）
@@ -706,6 +764,25 @@ def _in_quiet(start, end, cur=None):
     if a < c:
         return a <= cur < c          # 同日区间，如 13:00~14:00
     return cur >= a or cur < c       # 跨零点区间，如 23:00~07:00
+
+
+# --- 他从哪连进来的：天气城市跟着这个 IP 定位 ---
+
+_LAST_IP = {"ip": ""}
+
+
+def note_client_ip(ip):
+    """记下他最近的公网 IP（内网/回环不算 —— 桌宠走 SSH 隧道进来是 127.0.0.1）。"""
+    s = str(ip or "")
+    if not s or s.startswith(("127.", "10.", "192.168.", "172.16.", "172.17.",
+                              "172.18.", "172.19.", "172.2", "172.30.", "172.31.",
+                              "169.254.", "::1")):
+        return
+    _LAST_IP["ip"] = s
+
+
+def _his_ip():
+    return _LAST_IP["ip"]
 
 
 def _proactive_quota_file():
@@ -1172,6 +1249,7 @@ def start_remote_api(brain):
             if not self._check():
                 self._json(401, {"err": "bad token"})
                 return
+            note_client_ip(self.client_address[0])
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
@@ -1181,6 +1259,22 @@ def start_remote_api(brain):
             try:
                 if path == "/api/chat":
                     _in_text = str(body.get("text") or "")
+                    # 快递意图：话里带单号就进监控（每30分钟自动查，有进展她主动说），
+                    # 现状塞给模型，她回话时能顺口告诉他"刚发出去了"
+                    try:
+                        import features as _feat
+                        if _feat.on("packages"):
+                            import packages as _pkg
+                            _tok = (API_CFG.get("uapi") or {}).get("token") or ""
+                            _regs = [_pkg.register(no, _tok)
+                                     for no in _pkg.extract_tracking(_in_text)]
+                            _regs = [r for r in _regs if r]
+                            if _regs:
+                                _in_text += "\n（系统提示：检测到快递单号 " + "、".join(
+                                    _pkg.status_line(r) for r in _regs) + \
+                                    "。已加入监控，每30分钟自动查一次，有进展你会主动告诉他）"
+                    except Exception:
+                        pass
                     try:
                         _proactive_note_user()   # 他说话了：给自适应频率喂反馈
                     except Exception:
@@ -1412,6 +1506,15 @@ def start_remote_api(brain):
                     # 她"拍一张照片"：prompt -> 生成图 -> 存云上，返回文件名
                     name = _cloud_gen_image(str(body.get("prompt") or "")[:400])
                     self._json(200, {"name": name, "err": "" if name else "生图失败"})
+                elif path == "/api/features":
+                    # App 设置页的功能开关：传哪个改哪个，返回改后的全量
+                    import features as _feat
+                    patch = body if isinstance(body, dict) else {}
+                    patch.pop("token", None)
+                    cur = _feat.set_features(patch) if patch else None
+                    if cur is None:
+                        cur = _feat.all_features()
+                    self._json(200, {"features": cur})
                 elif path == "/api/moment/like":
                     try:
                         import moments
@@ -1465,6 +1568,7 @@ def start_remote_api(brain):
             if not self._check():
                 self._json(401, {"err": "bad token"})
                 return
+            note_client_ip(self.client_address[0])
             path = self.path.split("?")[0]
             if path == "/api/persona":
                 # App 设置页的人设切换要用：当前是哪套 + 有哪些预设
@@ -1584,6 +1688,10 @@ def start_remote_api(brain):
                     self._json(200, {"items": moments.list_moments(30)})
                 except Exception as e:
                     self._json(200, {"items": [], "err": str(e)[:80]})
+            elif path == "/api/features":
+                # App 设置页读功能开关
+                import features as _feat
+                self._json(200, {"features": _feat.all_features()})
             elif path == "/api/app/version":
                 # App 内置更新检查：读版本文件（发布新 APK 时一起更新）
                 try:
@@ -1743,7 +1851,18 @@ def _add_moment_from_answer(ans):
 
     def _take_scene(m):
         desc = (m.group(1) or "").strip()
-        n = _cloud_gen_image(desc, negative_prompt=GEN_NEGATIVE, size="768x1024")
+        # 优先从随机图库拿现成的（省生成时间，也更像"随手拍下来的一张"），
+        # 拉不到再按描述生成。分类从生活感的三类里随机挑
+        n = ""
+        try:
+            import features as _feat
+            if _feat.on("rand_img_moment"):
+                n = _cloud_random_image(random.choice(
+                    ("landscape", "acg", "general_anime")))
+        except Exception:
+            n = ""
+        if not n:
+            n = _cloud_gen_image(desc, negative_prompt=GEN_NEGATIVE, size="768x1024")
         if n:
             imgs.append(n)
         return ""
@@ -1875,17 +1994,22 @@ def run_server():
                         first = False
                         continue
                     first = False
-                    # 顺路刷天气 + 热搜缓存（失败静默，聊天链路只读缓存文件）
+                    # 顺路刷天气 + 热搜缓存（失败静默，聊天链路只读缓存文件）。
+                    # 天气城市跟他的 IP 走；热搜进 6 小时槽位才刷（0/6/12/18 点整）
                     try:
                         tok = (API_CFG.get("uapi") or {}).get("token")
-                        city = (_LOCAL["brain"].life.world.get("city")
-                                if getattr(_LOCAL.get("brain"), "life", None) else "")
+                        fallback = (_LOCAL["brain"].life.world.get("city")
+                                    if getattr(_LOCAL.get("brain"), "life", None)
+                                    else "")
                         if tok:
+                            import features as _feat
                             import weather_cache, hotboard_cache
-                            if city:
-                                weather_cache.refresh(city, tok)
-                            plat = (API_CFG.get("uapi") or {}).get("hotboard_type") or "weibo"
-                            hotboard_cache.refresh(plat, tok)
+                            if _feat.on("weather"):
+                                weather_cache.refresh_auto(_his_ip(), tok, fallback)
+                            if _feat.on("hotboard") and hotboard_cache.should_refresh():
+                                plat = ((API_CFG.get("uapi") or {})
+                                        .get("hotboard_type") or "douyin")
+                                hotboard_cache.refresh(plat, tok)
                     except Exception:
                         pass
                     if moments.today_count() >= 4:
@@ -1970,6 +2094,65 @@ def run_server():
                 except Exception as e:
                     print(f"[大脑] 主动搭话循环出错：{str(e)[:80]}", flush=True)
         threading.Thread(target=_proactive_loop,
+                         args=(_LOCAL["brain"],), daemon=True).start()
+
+        # 事件提醒循环：快递每 30 分钟查一次（进监控的单号）、天气变化按规则触发。
+        # 生成走 chat(proactive=True)，发出去走主动搭话同一条路（App 轮询拉到弹通知）。
+        # 静默时段照躲：快递到了也不凌晨轰炸，睡醒那轮补说
+        def _reminder_loop(b):
+            def _say(prompt):
+                with _LOCAL["lock"]:
+                    ans, _m = b.chat(prompt, proactive=True, log=False)
+                text = strip_say_marker((ans or "").strip())
+                if not text or text == "无":
+                    return
+                _cloud_append_assistant(text)
+                print("[大脑] 事件提醒：%s" % text[:50], flush=True)
+
+            time.sleep(90)           # 启动先让缓存和大脑站稳
+            while True:
+                try:
+                    pa = _proactive_conf()
+                    if _in_quiet(pa.get("quiet_start", "23:00"),
+                                 pa.get("quiet_end", "07:00")):
+                        time.sleep(1800)
+                        continue
+                    tok = (API_CFG.get("uapi") or {}).get("token") or ""
+                    import features as _feat
+                    # 天气：代码判档位（雨/雪/高温/低温/大风，一天一档只报一次）
+                    try:
+                        if _feat.on("weather_alert"):
+                            import weather_cache
+                            trg = weather_cache.check_trigger()
+                            if trg:
+                                event, detail = trg
+                                city = weather_cache.city() or "他那边"
+                                _say("[系统指令] 他那边现在天气有变化，你要主动发一条"
+                                     "消息关心他。\n[触发事件] 他那边（%s）%s（%s）。\n"
+                                     "[回复规则] 用你平时的口气关心一句（提醒带伞/"
+                                     "加衣服/别中暑都行），顺带说一句你此刻正在做的"
+                                     "小事，50字以内。别写成天气预报，别问他住哪。"
+                                     % (city, event, detail))
+                    except Exception as e:
+                        print("[大脑] 天气提醒出错：%s" % str(e)[:60], flush=True)
+                    # 快递：状态变到 派送中/签收/异常 才说
+                    try:
+                        if _feat.on("packages"):
+                            import packages
+                            for ev in packages.poll(tok):
+                                rec = ev["rec"]
+                                _say("[系统指令] 他的快递有新进展，你要主动告诉他。\n"
+                                     "[快递] %s\n[回复规则] 用你平时的口气说，一两句，"
+                                     "别报物流流水账。派送中就提醒他去取，签收了就说"
+                                     "到了，异常就让他找卖家。"
+                                     % packages.status_line(rec))
+                    except Exception as e:
+                        print("[大脑] 快递提醒出错：%s" % str(e)[:60], flush=True)
+                    time.sleep(30 * 60)
+                except Exception as e:
+                    print(f"[大脑] 提醒循环出错：{str(e)[:80]}", flush=True)
+                    time.sleep(600)
+        threading.Thread(target=_reminder_loop,
                          args=(_LOCAL["brain"],), daemon=True).start()
 
     print("=" * 58, flush=True)

@@ -44,3 +44,44 @@ def fetch_hotboard(platform, token):
         return d.get("list") or []
     except Exception:
         return None
+
+
+def fetch_tracking(number, token, phone=""):
+    """快递物流：{carrier_name, status, status_code, is_completed,
+    tracks:[{time, context}]}（tracks 按时间倒序，tracks[0] 是最新），失败 None。"""
+    p = {"tracking_number": number}
+    if phone:
+        p["phone"] = phone
+    try:
+        return _get("/misc/tracking/query", p, token)
+    except Exception:
+        return None
+
+
+def fetch_ip_city(ip, token):
+    """IP 归属地的城市名。region 形如「中国 山东省 烟台市」，取最后一段去掉「市」。
+    定不准（境外/字段缺失）返回 None，调用方退回配置里的默认城市。"""
+    try:
+        d = _get("/network/ipinfo", {"ip": ip}, token)
+        parts = [p for p in str(d.get("region") or "").split() if p]
+        city = (parts[-1] if parts else "").strip().rstrip("市")
+        return city or None
+    except Exception:
+        return None
+
+
+def fetch_random_image(category, token, timeout=15):
+    """随机图片：接口直接回图片二进制（302 到图床后返回 image/*）。
+    成功返回 bytes，失败/返回的不是图返回 None。超时给足 —— 风景/二次元
+    图一张几百 KB 到 2MB，云机 1Mbps 出网，8 秒会临界。"""
+    url = _BASE + "/random/image?" + urllib.parse.urlencode({"category": category})
+    req = urllib.request.Request(url + "&token=" + urllib.parse.quote(token))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            ctype = str(r.headers.get("Content-Type") or "")
+            data = r.read()
+        if data and ctype.startswith("image/"):
+            return data
+    except Exception:
+        pass
+    return None

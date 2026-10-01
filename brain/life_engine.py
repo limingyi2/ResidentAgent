@@ -434,21 +434,27 @@ class LifeEngine:
                 bits.append(f"- 社团：{c}")
         if w.get("notes"):
             bits.append("- " + str(w["notes"]))
-        # 天气只读缓存（weather_cache 刷的），取不到就不提 —— 聊天不为它多等一秒
+        # 天气只读缓存（weather_cache 刷的），城市跟他的 IP 走 —— 这是"他那边"的天气，
+        # 她拿来关心他，不是自己的。取不到就不提，聊天不为它多等一秒
         try:
-            import weather_cache
-            wx = weather_cache.note()
-            if wx:
-                bits.append(f"- 你那边现在的天气：{wx}")
+            import features as _feat
+            if _feat.on("weather"):
+                import weather_cache
+                wx = weather_cache.note()
+                if wx:
+                    loc = weather_cache.city() or "他那边"
+                    bits.append(f"- 他那边（{loc}）现在的天气：{wx}")
         except Exception:
             pass
         # 热搜也是缓存喂的。措辞是"她刚刷到"，不是新闻播报 —— 别让她念榜单
         try:
-            import hotboard_cache
-            hot = hotboard_cache.note()
-            if hot:
-                bits.append("- 你刚才刷手机看到的热搜（你想聊哪个就聊哪个，"
-                            "也可以完全不提，别一条条播报）：" + hot)
+            import features as _feat
+            if _feat.on("hotboard"):
+                import hotboard_cache
+                hot = hotboard_cache.note()
+                if hot:
+                    bits.append("- 你刚才刷手机看到的热搜（你想聊哪个就聊哪个，"
+                                "也可以完全不提，别一条条播报）：" + hot)
         except Exception:
             pass
         ds = date_str or datetime.date.today().isoformat()
