@@ -246,10 +246,10 @@ def resolve_rand_tags(text, user_text=""):
     """[rand:分类] → 从图库拉一张现成图，换成 [img:文件名]。
 
     分类不在册 / 功能开关关了 / 图拉不到，都把标签删干净，原文绝不能漏给用户。
-    模型会把标签写成 [img:rand:bq] 这种嵌套变体，先归一化再解析。
+    模型会把标签写成 [img:rand:bq] 这种嵌套变体，先归一化再解析（忽略大小写）。
     """
     text = re.sub(r"\[img[:：]\s*rand[:：]\s*([^\]]+?)\s*\]", r"[rand:\1]",
-                  (text or ""))
+                  (text or ""), flags=re.IGNORECASE)
     def _sub(m):
         cat = (m.group(1) or "").strip().lower()
         if cat in _RAND_WALLPAPER:
@@ -265,7 +265,10 @@ def resolve_rand_tags(text, user_text=""):
             pass
         n = _cloud_random_image(cat)
         return ("[img:%s]" % n) if n else ""
-    return RAND_TAG_RE.sub(_sub, (text or ""))
+    out = RAND_TAG_RE.sub(_sub, (text or ""))
+    # 兜底：任何形态的 rand 残留（怪变体、半截标签）一律整段删掉，
+    # 存档里漏一个原样标签，App 就是 404 裂图（03:43 那次"图片消失"的根源）
+    return re.sub(r"\[(?:img[:：]\s*)?rand[^]]*\]", "", out, flags=re.IGNORECASE)
 
 
 # --- 自拍 ---
@@ -584,14 +587,16 @@ def catch_up_life_local(brain):
         print(f"[大脑] 生活补算失败（不影响聊天）：{e}", flush=True)
 
 
-def ask_with_retry(text, img_b64=None):
+def ask_with_retry(text, img_b64=None, display=None):
     """让她回一句话。
 
     img_b64：这一轮带的图片（base64），交给视觉模型让她"看见"。
+    display：存档/给用户看的那份原文（不含系统注入的提示），None 就用 text。
     返回 (她的话, 模式标签, 错误信息) —— 不抛异常，调用方好写。
 
     server.py 只有一种形态：本进程自带大脑，不再转发给桌宠。
     """
+    orig_text = text if display is None else display
     # 她就在本进程里，直接问，不走网络
     if _LOCAL["brain"] is not None:
         try:
@@ -627,7 +632,7 @@ def ask_with_retry(text, img_b64=None):
                     if name:
                         ans = _selfie_caption(place) + "\n[img:" + name + "]"
                         try:
-                            _LOCAL["brain"]._log_turn(text, ans, img=None)
+                            _LOCAL["brain"]._log_turn(orig_text, ans, img=None)
                         except Exception as e:
                             print(f"[大脑] 自拍存档失败（不影响回复）：{e}",
                                   flush=True)
@@ -649,9 +654,10 @@ def ask_with_retry(text, img_b64=None):
             ans = resolve_rand_tags(ans, text)
             # 她加了 [voice] 就合成真语音条（失败自动降级成纯文字）
             ans = resolve_voice_tag(ans, API_CFG)
-            # 存档记的是处理后的正文（带 [img:gen_xxx.png]，App 能直接显示）
+            # 存档记的是处理后的正文（带 [img:gen_xxx.png]，App 能直接显示）；
+            # 用户侧只存他真正说的话 —— 看图描述、快递系统提示只进模型，别进他的气泡
             try:
-                _LOCAL["brain"]._log_turn(text, ans, img=img_path or None)
+                _LOCAL["brain"]._log_turn(orig_text, ans, img=img_path or None)
             except Exception as e:
                 print(f"[大脑] 存档失败（不影响回复）：{e}", flush=True)
             return ans, mode, ""
@@ -1259,6 +1265,7 @@ def start_remote_api(brain):
             try:
                 if path == "/api/chat":
                     _in_text = str(body.get("text") or "")
+                    _disp = _in_text          # 存档用原文，注入的系统提示不带
                     # 快递意图：话里带单号就进监控（每30分钟自动查，有进展她主动说），
                     # 现状塞给模型，她回话时能顺口告诉他"刚发出去了"
                     try:
@@ -1280,7 +1287,7 @@ def start_remote_api(brain):
                     except Exception:
                         pass
                     ans, mode, err = ask_with_retry(
-                        _in_text, body.get("img") or None)
+                        _in_text, body.get("img") or None, display=_disp)
                     # 出错就留一行（欠费 402、模型名写错、地址变了都在这儿现形）
                     if err:
                         try:
@@ -1319,6 +1326,16 @@ def start_remote_api(brain):
                     self._json(200, {"reply": ans, "messages": split_messages(ans),
                                      "mode": mode, "err": err,
                                      "t": time.strftime("%Y-%m-%d %H:%M")})
+                elif path == "/api/packages/del":
+                    # 删掉就移出监控，她的提醒跟着停（poll 只扫这份存档）
+                    import packages as _pkg
+                    ok = _pkg.remove(str(body.get("number") or "").upper())
+                    self._json(200, {"ok": bool(ok)})
+                elif path == "/api/packages/note":
+                    import packages as _pkg
+                    p = _pkg.set_note(str(body.get("number") or "").upper(),
+                                      str(body.get("note") or ""))
+                    self._json(200, {"ok": bool(p), "rec": p})
                 elif path == "/api/proactive":
                     with _LOCAL["lock"]:
                         ans, mode = brain.speak_on_scene(
@@ -1711,22 +1728,22 @@ def start_remote_api(brain):
                     self.wfile.write(blob)
                 except Exception as e:
                     self._json(404, {"err": str(e)[:60]})
+            elif path == "/api/packages":
+                # App 快递管理页：监控中的单号列表
+                try:
+                    import packages
+                    self._json(200, {"items": packages.list_all()})
+                except Exception as e:
+                    self._json(200, {"items": [], "err": str(e)[:80]})
             elif path == "/api/stickers":
+                # 只回表情包库（data/stickers）；upload 里是聊天/自拍图，倒进来
+                # App 面板会塞满他没添加过的图
                 names = []
                 try:
                     import stickers
                     names = list(stickers.all_names())
                 except Exception:
                     names = []
-                try:
-                    from paths import UPLOAD_DIR
-                    up = str(UPLOAD_DIR)
-                    if os.path.isdir(up):
-                        names += [n for n in os.listdir(up)
-                                  if n.lower().endswith((".jpg", ".jpeg", ".png",
-                                                         ".gif", ".webp"))]
-                except Exception:
-                    pass
                 self._json(200, {"names": names})
             elif path == "/api/voice":
                 # 她发的语音条（voice.py 合成，文件在 data/voice/）

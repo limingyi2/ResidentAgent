@@ -86,9 +86,38 @@ def register(number, token):
 
 def status_line(rec):
     """给提示词注入用的一句话现状。"""
-    return "%s 单号 %s，当前状态：%s%s" % (
-        rec.get("carrier"), rec.get("number"), rec.get("status"),
+    note = ("（%s）" % rec["note"]) if rec.get("note") else ""
+    return "%s 单号 %s，当前状态：%s%s%s" % (
+        rec.get("carrier"), rec.get("number"), rec.get("status"), note,
         ("；最新：%s" % rec["latest"]) if rec.get("latest") else "")
+
+
+def list_all():
+    """全部监控中的单号（App 快递页用），按加入时间倒序。"""
+    return sorted(_load()["packages"],
+                  key=lambda r: r.get("added_at") or "", reverse=True)
+
+
+def remove(number):
+    """移出监控（App 里删了，她的提醒也就跟着停了 —— poll 只扫这份存档）。"""
+    db = _load()
+    n = len(db["packages"])
+    db["packages"] = [p for p in db["packages"] if p["number"] != number]
+    if len(db["packages"]) == n:
+        return False
+    _save(db)
+    return True
+
+
+def set_note(number, note):
+    """改备注（App 快递页的「编辑」）。"""
+    db = _load()
+    for p in db["packages"]:
+        if p["number"] == number:
+            p["note"] = (note or "").strip()[:30]
+            _save(db)
+            return p
+    return None
 
 
 def poll(token):

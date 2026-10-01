@@ -43,6 +43,8 @@ body.notab .page { bottom:0; }
 .bub { max-width:72%; margin:0 9px; padding:9px 12px; border-radius:5px; background:#fff; font-size:15.5px; line-height:1.45; white-space:pre-wrap; word-break:break-word; position:relative; }
 .mrow.me .bub { background:#95ec69; }
 .bub img { max-width:150px; max-height:200px; border-radius:4px; display:block; }
+.bub.imgonly, .mrow.me .bub.imgonly { background:transparent; padding:0; }
+.bub.imgonly img { max-width:180px; max-height:240px; border-radius:6px; }
 .typing { text-align:center; font-size:11.5px; color:#b2b2b2; padding:4px 0; }
 .chatfoot { flex:none; background:#f7f7f7; border-top:0.5px solid #dcdcdc; padding:7px 10px; display:flex; align-items:center; gap:8px; }
 .chatfoot textarea { flex:1; border:none; background:#fff; border-radius:5px; height:36px; padding:8px 10px; font-size:15.5px; resize:none; outline:none; }
@@ -54,10 +56,16 @@ body.notab .page { bottom:0; }
 #imgPrev b { color:#e5497f; font-weight:normal; }
 /* ---- 表情面板 ---- */
 #stkPanel { position:absolute; left:0; right:0; bottom:52px; height:230px; background:#f7f7f7; border-top:0.5px solid #dcdcdc; display:none; flex-direction:column; z-index:30; }
-#stkGrid { flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(5,1fr); gap:6px; padding:10px; }
+#stkGrid { flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(5,1fr); gap:6px; padding:10px; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
 #stkGrid img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; background:#fff; }
 .stkcell { position:relative; }
 .stkcell .del { position:absolute; top:-4px; right:-4px; width:18px; height:18px; border-radius:50%; background:#fa5151; color:#fff; font-size:12px; line-height:18px; text-align:center; }
+.stkhead { grid-column:1/-1; font-size:12px; color:#999; padding:2px 2px 0; }
+.pkg { margin:2px 0; }
+.pkgx { background:#fafafa; border-radius:8px; margin:2px 9px 6px 57px; padding:10px 12px; font-size:13px; color:#444; line-height:1.5; }
+.pkg .pbtns { display:flex; gap:8px; margin-top:8px; }
+.pkg .pbtns button { flex:1; border:0.5px solid #ddd; background:#fff; border-radius:6px; padding:7px 0; font-size:13px; color:#191919; }
+.pkg .pbtns button.danger { color:#fa5151; }
 .stkadd { display:flex; align-items:center; justify-content:center; font-size:26px; color:#b2b2b2; background:#fff; border-radius:6px; aspect-ratio:1; }
 /* ---- 通用列表页 ---- */
 .grp { margin-top:8px; }
@@ -179,6 +187,8 @@ body.notab .page { bottom:0; }
         <div class="cmain"><div class="cname">朋友圈</div></div><span class="arrow">›</span></div>
       <div class="cell" onclick="openPage('diary')"><div class="ico" style="background:#7e6bf2">记</div>
         <div class="cmain"><div class="cname">日记</div></div><span class="arrow">›</span></div>
+      <div class="cell" onclick="openPage('packages')"><div class="ico" style="background:#10aeff">递</div>
+        <div class="cmain"><div class="cname">快递</div></div><span class="arrow">›</span></div>
     </div>
     <div class="grp">
       <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#fa5151">视</div><div class="cmain"><div class="cname gray">视频号</div></div><span class="arrow">›</span></div>
@@ -187,6 +197,15 @@ body.notab .page { bottom:0; }
       <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#3e7bfa">看</div><div class="cmain"><div class="cname gray">看一看</div></div><span class="arrow">›</span></div>
       <div class="cell" onclick="tip('敬请期待')"><div class="ico" style="background:#3e7bfa">搜</div><div class="cmain"><div class="cname gray">搜一搜</div></div><span class="arrow">›</span></div>
     </div>
+  </div>
+</div>
+
+<!-- 快递管理 -->
+<div class="page" id="page-packages">
+  <div class="topbar"><div class="bk" onclick="openPage('discover')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">快递</div></div>
+  <div class="body">
+    <div id="pkgHint" style="font-size:12.5px;color:#999;padding:10px 16px">聊天里提过单号就会自动加进来，每 30 分钟自动查一次，有进展她会主动说。</div>
+    <div class="grp" id="pkgList"></div>
   </div>
 </div>
 
@@ -407,7 +426,7 @@ body.notab .page { bottom:0; }
 /* --- 基础 --- */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 20;   // 20 = 长按图片存相册（已存可删）+ 设置页功能开关 + 修回复双份；19 = 回复拆多条气泡连发；18 = 语音条不再重复显示文字
+const APP_CODE  = 21;   // 21 = 修表情包模块：长按图片可加入我的表情包、长按/红点删表情、原生confirm假死改自绘弹层、表情面板只显图库（不再混入自拍聊天图）、图挂了给可见提示；20 = 长按存相册+功能开关+修双份
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
@@ -488,18 +507,19 @@ window.fetch = function (u, o) {
 
 /* --- 页面导航 --- */
 let curPage = 'list';
-const BACK_MAP = { chat: 'list', moments: 'discover', settings: 'me', profile: 'contacts', diary: 'discover', models: 'settings', logs: 'settings' };
+const BACK_MAP = { chat: 'list', moments: 'discover', settings: 'me', profile: 'contacts', diary: 'discover', models: 'settings', logs: 'settings', packages: 'discover' };
 function openPage(p) {
   document.querySelectorAll('.page').forEach(el => el.classList.remove('on'));
   $('page-' + p).classList.add('on');
   curPage = p;
   const hideTab = ['chat', 'moments', 'settings', 'profile', 'diary',
-                   'models', 'logs'].indexOf(p) >= 0;
+                   'models', 'logs', 'packages'].indexOf(p) >= 0;
   $('tabbar').style.display = hideTab ? 'none' : 'flex';
   document.body.classList.toggle('notab', hideTab);
   if (p === 'chat') loadHistory(true);
   if (p === 'moments') loadMoments();
   if (p === 'diary') loadDiaryList();
+  if (p === 'packages') loadPackages();
   if (p === 'settings') { loadPersonas(); loadVoices(); loadStats(); }
   if (p === 'discover') switchTab('discover');
 }
@@ -602,15 +622,18 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
     else src = api('/api/img') + '&name=' + encodeURIComponent(ext);
     const im = document.createElement('img');
     im.src = src;
+    if (ext.indexOf('data:') !== 0 && !imgIsB64)
+      addLongPress(im, () => imgMenu(ext, im.src));   // 存档里的图：长按保存/加表情包
     im.onload = () => scrollBottom();      // 图片撑高列表后仍要贴回底部
     im.onerror = () => scrollBottom();     // 加载失败也要：行可能从占位变矮
     im.onclick = () => view(im.src);
     bub.appendChild(im);
     const shown = cleanMine(raw);
     if (shown) { const tx = document.createElement('div'); tx.textContent = shown; bub.appendChild(tx); }
+    else bub.classList.add('imgonly');     // 纯图/表情包：去掉气泡底色，干净见图
   } else if (/\[voice[:：][^\]]+\]/.test(raw)) {
-    // 语音条：文字已由服务端合成 mp3，这里只播放；标签后的原文不再渲染（否则像"语音+重复文字"），历史里仍留着。
-    const m = raw.match(/\[voice[:：]([^\]]+)\]/);
+    // 语音条：音频 + 下方灰字转写（服务端把 [voice] 和它那句合成一条了）
+    const m = raw.match(/\[voice[:：]([^\]]+)\]\s*\n?([\s\S]*)/);
     const au = document.createElement('audio');
     au.controls = true;
     au.preload = 'none';
@@ -619,24 +642,38 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
     au.src = api('/api/voice') + '&name=' + encodeURIComponent(m[1].trim());
     au.onerror = () => { const t = document.createElement('div'); t.textContent = '（这段语音没取到）'; bub.appendChild(t); };
     bub.appendChild(au);
+    const spoken = (m[2] || '').trim();
+    if (spoken) {
+      const tx = document.createElement('div');
+      tx.textContent = spoken;
+      tx.style.cssText = 'font-size:12.5px;color:#888;margin-top:3px;line-height:1.45;';
+      bub.appendChild(tx);
+    }
   } else if (/\[img[:：][^\]]+\]/.test(raw)) {
     // 正文里夹着 [img:名字]（可能单独一行、也可能前面还有文字）→ 逐段渲染成文字+图
     const re = /\[img[:：]([^\]]+)\]/g;
-    let idx = 0, m;
+    let idx = 0, m, visText = '';
     while ((m = re.exec(raw)) !== null) {
       const before = raw.slice(idx, m.index).replace(/\n+$/, '');
-      if (before) bub.appendChild(document.createTextNode(before));
+      if (before) { bub.appendChild(document.createTextNode(before)); visText += before; }
       const im = document.createElement('img');
       im.src = api('/api/img') + '&name=' + encodeURIComponent(m[1].trim());
       im.onload = () => scrollBottom();    // 同上：图加载完再贴一次底
-      im.onerror = () => scrollBottom();
+      im.onerror = () => {                 // 图挂了给句可见的话，别悄悄塌成空泡
+        const t = document.createElement('div');
+        t.textContent = '（这张图没加载出来，点她再发一张）';
+        t.style.cssText = 'font-size:12px;color:#999;';
+        im.replaceWith(t);
+        scrollBottom();
+      };
       im.onclick = () => view(im.src);
       addLongPress(im, () => imgMenu(m[1].trim(), im.src));   // 长按：保存/删除
       bub.appendChild(im);
       idx = re.lastIndex;
     }
     const after = raw.slice(idx).replace(/^\n+/, '');
-    if (after) bub.appendChild(document.createTextNode(after));
+    if (after) { bub.appendChild(document.createTextNode(after)); visText += after; }
+    if (!visText.trim()) bub.classList.add('imgonly');   // 纯图也没底色
   } else if (role === 'user') {
     const shown = cleanMine(raw);
     bub.textContent = shown || (raw ? '[图片]' : '');
@@ -725,6 +762,14 @@ function imgMenu(name, src) {
     b.onclick = () => { ov.remove(); if (fn) fn(); };
     sheet.appendChild(b);
   }
+  act('加入我的表情包', '#191919', async () => {
+    try {
+      const r = await fetch(src);
+      const fr = new FileReader();
+      fr.onload = () => addCustomSticker(String(fr.result).split(',')[1] || '');
+      fr.readAsDataURL(await r.blob());
+    } catch (e) { tip('图没取下来'); }
+  });
   act(saved ? '删除这张图（相册里的）' : '保存到手机相册', saved ? '#fa5151' : '#191919', async () => {
     if (saved) {
       if (window.Android && window.Android.deleteImage) { try { window.Android.deleteImage(name); } catch (e) {} }
@@ -909,10 +954,21 @@ async function loadStickers() {
 }
 function renderStickers() {
   const g = $('stkGrid'); g.innerHTML = '';
-  customStk().forEach(b64 => {
+  const head1 = document.createElement('div'); head1.className = 'stkhead';
+  head1.textContent = '我的表情包（长按删除）'; g.appendChild(head1);
+  const mine = customStk();
+  if (!mine.length) {
+    const empty = document.createElement('div'); empty.className = 'stkhead';
+    empty.textContent = '还没有，长按聊天里的图片就能收进来'; g.appendChild(empty);
+  }
+  mine.forEach(b64 => {
     const cell = document.createElement('div'); cell.className = 'stkcell';
     const im = document.createElement('img'); im.src = 'data:image/jpeg;base64,' + b64;
     im.onclick = () => sendSticker(b64);
+    addLongPress(im, () => stkMenu('这张表情包', () => {
+      localStorage.setItem('zx_mystk', JSON.stringify(customStk().filter(x => x !== b64)));
+      renderStickers();
+    }));
     const del = document.createElement('div'); del.className = 'del'; del.textContent = '×';
     del.onclick = e => {
       e.stopPropagation();
@@ -924,6 +980,8 @@ function renderStickers() {
   const add = document.createElement('div'); add.className = 'stkadd'; add.textContent = '＋';
   add.onclick = () => pick('sticker');
   g.appendChild(add);
+  const head2 = document.createElement('div'); head2.className = 'stkhead';
+  head2.textContent = '她的图库（点一下发同款给她看过的）'; g.appendChild(head2);
   cloudStk.forEach(n => {
     const im = document.createElement('img');
     im.src = api('/api/img') + '&name=' + encodeURIComponent(n);
@@ -939,12 +997,170 @@ function renderStickers() {
     g.appendChild(im);
   });
 }
+function stkMenu(label, onDel) {
+  // 长按表情包：底部弹层确认删除。原生 confirm() 在 WebView 里可能弹不出来，
+  // 整个界面点哪都没反应（假死），统一用自绘弹层
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-end;';
+  const sheet = document.createElement('div');
+  sheet.style.cssText = 'background:#fff;border-radius:14px 14px 0 0;width:100%;padding:6px 0 16px;';
+  function act(label2, color, fn) {
+    const b = document.createElement('div');
+    b.style.cssText = 'padding:14px;text-align:center;font-size:15.5px;color:' + color + ';border-bottom:1px solid #f2f2f2;';
+    b.textContent = label2;
+    b.onclick = () => { ov.remove(); if (fn) fn(); };
+    sheet.appendChild(b);
+  }
+  act('删除' + label, '#fa5151', onDel);
+  act('取消', '#888', null);
+  ov.appendChild(sheet);
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+}
 function sendSticker(b64) {
-  // 点一下就发会误触，结果以"他"的名义发出他自己都不知道的表情包，加一道确认拦住。
-  if (!confirm('把这张表情包发给她？')) return;
-  $('stkPanel').style.display = 'none';
-  addMsg('user', '', nowStr(), b64, true);
-  sendText('', b64);
+  // 点一下就发会误触，先弹自绘确认层拦一道（不用原生 confirm，会假死）
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-end;';
+  const sheet = document.createElement('div');
+  sheet.style.cssText = 'background:#fff;border-radius:14px 14px 0 0;width:100%;padding:6px 0 16px;';
+  function act(label, color, fn) {
+    const b = document.createElement('div');
+    b.style.cssText = 'padding:14px;text-align:center;font-size:15.5px;color:' + color + ';border-bottom:1px solid #f2f2f2;';
+    b.textContent = label;
+    b.onclick = () => { ov.remove(); if (fn) fn(); };
+    sheet.appendChild(b);
+  }
+  act('把这张表情包发给她？', '#191919', null);
+  act('发送', '#07c160', () => {
+    $('stkPanel').style.display = 'none';
+    addMsg('user', '', nowStr(), b64, true);
+    sendText('', b64);
+  });
+  act('取消', '#888', null);
+  ov.appendChild(sheet);
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+}
+
+/* --- 快递管理 --- */
+function copyTextCompat(s) {
+  // WebView 里 navigator.clipboard 常不可用（http 非安全上下文），兜底 execCommand
+  const fb = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = s;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, s.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      tip(ok ? '单号已复制' : '复制失败');
+    } catch (e) { tip('复制失败'); }
+  };
+  if (navigator.clipboard) navigator.clipboard.writeText(s).then(() => tip('单号已复制'), fb);
+  else fb();
+}
+async function loadPackages() {
+  const box = $('pkgList');
+  box.innerHTML = '<div style="font-size:13px;color:#999;padding:12px">加载中…</div>';
+  try {
+    const r = await fetch(api('/api/packages'));
+    const d = await r.json();
+    const items = d.items || [];
+    box.innerHTML = '';
+    if (!items.length) {
+      box.innerHTML = '<div style="font-size:13px;color:#999;padding:12px">还没有监控中的快递，聊天里提一句单号就行</div>';
+      return;
+    }
+    const stc = { out_for_delivery: '#fa9d3b', delivered: '#07c160', exception: '#fa5151' };
+    items.forEach(p => {
+      const wrap = document.createElement('div'); wrap.className = 'pkg';
+      const cell = document.createElement('div'); cell.className = 'cell';
+      const dot = stc[p.status_code] || '#10aeff';
+      cell.innerHTML =
+        '<div class="ico" style="background:' + dot + ';color:#fff;font-size:15px">' + esc((p.carrier || '件')[0]) + '</div>' +
+        '<div class="cmain"><div class="cname">' + esc(p.carrier || '快递') + ' · ' + esc(p.status || '未知') +
+        (p.note ? ' <span style="color:#999;font-size:12px">' + esc(p.note) + '</span>' : '') + '</div>' +
+        '<div class="crow2"><div class="cprev">' + esc(p.latest || '暂无物流动态') + '</div></div></div>' +
+        '<span class="arrow" style="transition:transform .15s">▾</span>';
+      const x = document.createElement('div'); x.className = 'pkgx'; x.style.display = 'none';
+      x.innerHTML = '<div>单号：' + esc(p.number) + '</div>' +
+        (p.latest ? '<div style="margin-top:3px;color:#888">最新：' + esc(p.latest) + '</div>' : '');
+      const btns = document.createElement('div'); btns.className = 'pbtns';
+      const bCopy = document.createElement('button'); bCopy.textContent = '复制单号';
+      bCopy.onclick = e => { e.stopPropagation(); copyTextCompat(p.number); };
+      const bNote = document.createElement('button'); bNote.textContent = '改备注';
+      bNote.onclick = e => { e.stopPropagation(); pkgEditNote(p); };
+      const bDel = document.createElement('button'); bDel.textContent = '删除';
+      bDel.className = 'danger';
+      bDel.onclick = async e => {
+        e.stopPropagation();
+        // 两段式：第一下变"再点确认"，防止手滑把单子删了
+        if (bDel.dataset.arm !== '1') {
+          bDel.dataset.arm = '1';
+          bDel.textContent = '再点一次确认删除';
+          return;
+        }
+        try {
+          await fetch(api('/api/packages/del'), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ number: p.number })
+          });
+          tip('已删除，她的提醒也停了');
+          loadPackages();
+        } catch (err) { tip('没删成，再试一次'); }
+      };
+      btns.appendChild(bCopy); btns.appendChild(bNote); btns.appendChild(bDel);
+      x.appendChild(btns);
+      cell.onclick = () => {
+        const open = x.style.display !== 'none';
+        x.style.display = open ? 'none' : 'block';
+        cell.querySelector('.arrow').style.transform = open ? '' : 'rotate(180deg)';
+        if (!open) { bDel.textContent = '删除'; bDel.dataset.arm = ''; }
+      };
+      cell.oncontextmenu = e => e.preventDefault();
+      wrap.appendChild(cell); wrap.appendChild(x);
+      box.appendChild(wrap);
+    });
+  } catch (e) {
+    box.innerHTML = '<div style="font-size:13px;color:#999;padding:12px">加载失败，退出去再进</div>';
+  }
+}
+function pkgEditNote(p) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;';
+  const dlg = document.createElement('div');
+  dlg.style.cssText = 'background:#fff;border-radius:12px;width:280px;padding:16px;';
+  dlg.innerHTML = '<div style="font-size:15px;font-weight:500;margin-bottom:10px">备注「' + esc(p.number) + '」</div>';
+  const inp = document.createElement('input');
+  inp.style.cssText = 'width:100%;box-sizing:border-box;border:0.5px solid #ddd;border-radius:6px;height:36px;padding:0 8px;font-size:14px;outline:none';
+  inp.value = p.note || '';
+  inp.placeholder = '比如：给妈妈的生日礼物';
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;margin-top:14px;justify-content:flex-end';
+  const cancel = document.createElement('button');
+  cancel.textContent = '取消';
+  cancel.style.cssText = 'border:none;background:#f2f2f2;color:#191919;border-radius:6px;padding:8px 14px;font-size:13.5px';
+  cancel.onclick = () => ov.remove();
+  const ok = document.createElement('button');
+  ok.textContent = '保存';
+  ok.style.cssText = 'border:none;background:#07c160;color:#fff;border-radius:6px;padding:8px 14px;font-size:13.5px';
+  ok.onclick = async () => {
+    try {
+      await fetch(api('/api/packages/note'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number: p.number, note: inp.value.trim() })
+      });
+    } catch (e) {}
+    ov.remove(); loadPackages();
+  };
+  row.appendChild(cancel); row.appendChild(ok);
+  dlg.appendChild(inp); dlg.appendChild(row);
+  ov.appendChild(dlg);
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+  setTimeout(() => inp.focus(), 50);
 }
 
 /* --- 朋友圈 --- */

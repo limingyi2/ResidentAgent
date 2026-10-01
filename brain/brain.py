@@ -208,13 +208,27 @@ def split_text(text, limit=MAX_CHARS):
 
 
 def split_messages(text, limit=MAX_CHARS):
-    """把回复拆成几条短消息；空行剔除。"""
+    """把回复拆成几条短消息；空行剔除。
+
+    [voice:…] 和它后面紧跟的一句转写合并成一条：拆开的话 App 会在语音条
+    后面跟一条复读的文字泡。其余照常按行拆。
+    """
     lines = [ln.strip() for ln in (text or "").replace("\r", "").split("\n")]
     lines = [ln for ln in lines if ln]
     if not lines:
         return []
+    merged = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if re.match(r"^\[voice[:：]", ln) and i + 1 < len(lines):
+            merged.append(ln + "\n" + lines[i + 1])
+            i += 2
+        else:
+            merged.append(ln)
+            i += 1
     out = []
-    for ln in lines:
+    for ln in merged:
         if len(ln) <= limit:
             out.append(ln)
         else:

@@ -88,7 +88,7 @@ public class PollService extends Service {
                 c.disconnect();
 
                 // 内置更新检查：服务器上有更新版就通知一次
-                int installedCode = 20;   // 跟着 APK 版本走，每次发版改这里（与 chat.html APP_CODE 一致）
+                int installedCode = 21;   // 跟着 APK 版本走，每次发版改这里（与 chat.html APP_CODE 一致）
                 URL vu = new URL(base + "/api/app/version?token=" + token);
                 HttpURLConnection vc = (HttpURLConnection) vu.openConnection();
                 vc.setConnectTimeout(8000);
