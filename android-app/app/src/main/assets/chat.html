@@ -394,7 +394,7 @@ body.notab .page { bottom:0; }
 /* --- 基础 --- */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 18;   // 18 = 语音条不再重复显示文字（2026-10-01）；17 = 设置页一键换声音；16 = 语音条 + 今日用量
+const APP_CODE  = 19;   // 19 = 回复按她的换行拆成多条气泡连发；18 = 语音条不再重复显示文字；17 = 设置页一键换声音
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
@@ -752,7 +752,14 @@ async function sendText(t, img) {
       body: JSON.stringify({ text: t, img: img || null })
     });
     const d = await r.json();
-    addMsg('assistant', d.reply || (d.err ? '（出错了：' + d.err + '）' : '…'), d.t || '');
+    // 服务端已按她的换行拆好段（messages）；旧服务器没这个字段就整条显示，前后版本都兼容
+    const parts = (Array.isArray(d.messages) && d.messages.length)
+      ? d.messages : [d.reply || (d.err ? '（出错了：' + d.err + '）' : '…')];
+    for (let i = 0; i < parts.length; i++) {
+      // 条与条之间歇一下，间隔随上一条的长度微增，像真人一条条打出来
+      if (i) await new Promise(res => setTimeout(res, Math.min(350 + (parts[i-1] || '').length * 25, 900)));
+      addMsg('assistant', parts[i], i === 0 ? (d.t || '') : '');
+    }
   } catch (e) {
     addMsg('assistant', '', '');
     tip('连不上她：去 我-设置-测试连接 看具体原因', 4000);

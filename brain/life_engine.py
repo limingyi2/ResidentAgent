@@ -434,11 +434,30 @@ class LifeEngine:
                 bits.append(f"- 社团：{c}")
         if w.get("notes"):
             bits.append("- " + str(w["notes"]))
-        br = self._break_of(date_str or datetime.date.today().isoformat())
+        ds = date_str or datetime.date.today().isoformat()
+        br = self._break_of(ds)
         if br:
             bits.append(f"- 你现在在{br.get('name', '假期')}里"
                         f"（{br.get('start')}~{br.get('end')}），学校不上课，一天都是你自己的")
-        elif not self._calendar_known(date_str or datetime.date.today().isoformat()):
+            # 假期进度由代码算好，模型只管照着说 —— 让它自己算日期，
+            # 它会顺着对方说（他把假期第一天说成最后一天，她就接了）
+            try:
+                s = datetime.date.fromisoformat(br["start"])
+                e = datetime.date.fromisoformat(br["end"])
+                nth = (datetime.date.fromisoformat(ds) - s).days + 1
+                back = e + datetime.timedelta(days=1)
+                wdn = "一二三四五六日"[back.isoweekday() - 1]
+                bits.append(f"- 假期共{(e - s).days + 1}天，今天是第{nth}天，"
+                            f"{back.month}月{back.day}日（周{wdn}）开学。"
+                            "他说的日期跟这里对不上时按这里为准，可以直接纠正他")
+            except Exception:
+                pass
+            # 假期人在哪：不写的话她默认还待在学校（国庆待在空宿舍）
+            hp = self.world.get("holiday_plan") or {}
+            if (hp.get("text") and hp.get("start") and hp.get("end")
+                    and hp["start"] <= ds <= hp["end"]):
+                bits.append(f"- 这次的安排：{hp['text']}，说话做事按这个来")
+        elif not self._calendar_known(ds):
             # 校历没维护到这天：让她含糊其辞，而不是编个笃定的答案
             bits.append("- 这天的放假安排还没出通知，你自己也不确定，"
                         "别把有没有课、放不放假说死，要用「应该 / 大概 / 还不确定」的口气")

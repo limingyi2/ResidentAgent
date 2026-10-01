@@ -157,6 +157,71 @@ def _is_silence(s):
     return core == "" or set(core) == {"无"}
 
 
+# --- 回复分段：把一条回复拆成"像真人连发的几条短消息" ---
+# 她已被要求自己用换行分条，这里尊重她的分条，只在单行仍超长时才硬拆。
+# 服务器（/api/chat 的 messages 字段）和存档（_log_turn）都用这一份，别处再写会漂。
+MAX_CHARS = 400          # 单条消息上限，超了就拆
+_SENT_END = "。！？!?…～~"
+_SOFT_END = "，、,；;：: "
+
+
+def split_text(text, limit=MAX_CHARS):
+    """把一行长文本拆成几条，每条不超过 limit。
+
+    不用"先按标点切再合并"：一大段没有句号的话会切出超长段。这里每次只在前 limit
+    个字符里找断点，找不到就硬断 —— 长度有保证。
+    优先级：句末标点 > 逗号 / 分号 / 空格 > 硬断。
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+
+    out = []
+    rest = text
+    floor = max(1, limit // 3)          # 断点太靠前就不值当，不如硬断
+
+    while len(rest) > limit:
+        window = rest[:limit]
+        cut = -1
+        for i in range(len(window) - 1, -1, -1):      # 先找句末
+            if window[i] in _SENT_END:
+                cut = i
+                break
+        if cut < floor:
+            for i in range(len(window) - 1, -1, -1):  # 退而求其次找逗号
+                if window[i] in _SOFT_END:
+                    cut = i
+                    break
+        if cut < floor:
+            cut = limit - 1                           # 实在没有就硬断
+
+        piece = rest[:cut + 1].strip()
+        if piece:
+            out.append(piece)
+        rest = rest[cut + 1:]
+
+    if rest.strip():
+        out.append(rest.strip())
+    return out
+
+
+def split_messages(text, limit=MAX_CHARS):
+    """把回复拆成几条短消息；空行剔除。"""
+    lines = [ln.strip() for ln in (text or "").replace("\r", "").split("\n")]
+    lines = [ln for ln in lines if ln]
+    if not lines:
+        return []
+    out = []
+    for ln in lines:
+        if len(ln) <= limit:
+            out.append(ln)
+        else:
+            out.extend(split_text(ln, limit))
+    return out
+
+
 class Brain:
     def __init__(self, mem=None, api_config=None, life=None,
                  mode="api", max_new_tokens=90, history_turns=24):
@@ -530,6 +595,8 @@ class Brain:
         """把这一轮存进 chat_history.jsonl。写不进去也不能影响聊天。
 
         img 是可选的图片路径 —— 手机/App 靠它把图显示出来，只加在 user 那条上。
+        她的回复按段拆开各存一行：App 一行一个气泡，不拆的话重开 App 后
+        刚才连发的几条会并回一个大泡，前后对不上。
         """
         try:
             t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -538,8 +605,9 @@ class Brain:
                 u["img"] = img
             with open(CHAT_LOG, "a", encoding="utf-8") as f:
                 f.write(json.dumps(u, ensure_ascii=False) + "\n")
-                f.write(json.dumps({"t": t, "role": "assistant", "text": ans},
-                                   ensure_ascii=False) + "\n")
+                for piece in split_messages(ans):
+                    f.write(json.dumps({"t": t, "role": "assistant", "text": piece},
+                                       ensure_ascii=False) + "\n")
         except OSError:
             pass
 

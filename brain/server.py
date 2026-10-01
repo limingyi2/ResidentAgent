@@ -476,7 +476,6 @@ def _sticker_path(name):
     except Exception:
         return ""
 
-MAX_CHARS = 400        # 单条消息上限，超了就拆
 API_TIMEOUT = 120      # 等她回答最多等多久
 
 
@@ -612,72 +611,9 @@ def ask_with_retry(text, img_b64=None):
     return "", "", "大脑没起来"
 
 
-# --- 发消息用的小工具 ---
-
-_SENT_END = "。！？!?…～~"
-_SOFT_END = "，、,；;：: "
-
-
-def split_text(text, limit=MAX_CHARS):
-    """把长回复拆成几条，每条不超过 limit。
-
-    不用"先按标点切再合并"：一大段没有句号的话会切出超长段。这里每次只在前 limit
-    个字符里找断点，找不到就硬断 —— 长度有保证。
-    优先级：句末标点 > 逗号 / 分号 / 空格 > 硬断。
-    """
-    text = (text or "").strip()
-    if not text:
-        return []
-    if len(text) <= limit:
-        return [text]
-
-    out = []
-    rest = text
-    floor = max(1, limit // 3)          # 断点太靠前就不值当，不如硬断
-
-    while len(rest) > limit:
-        window = rest[:limit]
-        cut = -1
-        for i in range(len(window) - 1, -1, -1):      # 先找句末
-            if window[i] in _SENT_END:
-                cut = i
-                break
-        if cut < floor:
-            for i in range(len(window) - 1, -1, -1):  # 退而求其次找逗号
-                if window[i] in _SOFT_END:
-                    cut = i
-                    break
-        if cut < floor:
-            cut = limit - 1                           # 实在没有就硬断
-
-        piece = rest[:cut + 1].strip()
-        if piece:
-            out.append(piece)
-        rest = rest[cut + 1:]
-
-    if rest.strip():
-        out.append(rest.strip())
-    return out
-
-
-def split_messages(text, limit=MAX_CHARS):
-    """把回复拆成"像真人连发的几条短消息"。
-
-    她已经被要求自己用换行分条，这里尊重她的分条，只在单行仍超长时才用 split_text
-    兜底硬拆。
-    """
-    lines = [ln.strip() for ln in (text or "").replace("\r", "").split("\n")]
-    lines = [ln for ln in lines if ln]
-    if not lines:
-        return []
-    out = []
-    for ln in lines:
-        if len(ln) <= limit:
-            out.append(ln)
-        else:
-            out.extend(split_text(ln, limit))
-    return out
-
+# --- 发消息用的小工具（split_text / split_messages 搬进了 brain.py，
+#     /api/chat 的 messages 字段和聊天存档共用一份，别处再写会漂） ---
+from brain import split_messages
 
 
 def _query_param(path, key):
@@ -1293,8 +1229,10 @@ def start_remote_api(brain):
                         })
                     except Exception:
                         pass
-                    # 带上这条回复的时刻：App 靠它显示每条消息的时间，不返回的话前端只能传空串
-                    self._json(200, {"reply": ans, "mode": mode, "err": err,
+                    # reply 整段保留（旧版 App 兼容）；messages 按她的换行拆好段，
+                    # 新版 App 逐条渲染成连发的气泡，存档也按这个粒度拆行
+                    self._json(200, {"reply": ans, "messages": split_messages(ans),
+                                     "mode": mode, "err": err,
                                      "t": time.strftime("%Y-%m-%d %H:%M")})
                 elif path == "/api/proactive":
                     with _LOCAL["lock"]:
