@@ -13,6 +13,9 @@ config.json
 # 仓库只放 world.example.json（字段全空），真实的那份留在本地。
 brain/config/world.json
 brain/config/*.bak*
+# 打包 APK 时注入 chat.html 的服务地址 + 鉴权口令（deploy/rebuild_apk.py 读它）。
+# 里面有云机公网 IP 和 brain_token，等同凭据，必须挡在仓库外。
+brain/config/app_conn.json
 # 注意：不要写 brain/config/*.json 通配 + !例外 —— 父级一旦被整条排除，
 # 后面的 ! 规则不生效（git 不会进已排除的目录找例外）。
 # 需要新增配置文件时，在下面显式写一行 !brain/config/xxx.json 即可。

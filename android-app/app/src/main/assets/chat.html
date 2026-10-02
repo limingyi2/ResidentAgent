@@ -431,6 +431,21 @@ let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
 function api(p) { return BASE + p + (p.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN); }
+
+/* 没填服务地址时，fetch 会把 "/api/xxx" 当成本地相对路径去 file:/// 下找，
+   必然失败 —— 而失败文案是 "Failed to fetch"，用户只会看成"网络不通"。
+   换包名装 App 等于全新安装（localStorage 是空的）最容易撞上这个。
+   所以这里显式拦住，并直接把人送到设置页，别让他自己猜。 */
+function needSetup(silent) {
+  if (BASE) return false;
+  errLocal('未配置', '服务地址为空（换包名重装后 localStorage 是空的）', 'ERROR');
+  if (!silent) {
+    try { $('baseIn').value = ''; openPage('settings');
+          $('connResult').textContent = '还没填服务地址 —— 填完点「保存并重新连接」'; }
+    catch (e) { tip('还没填服务地址，去「我 → 设置」填一次'); }
+  }
+  return true;
+}
 let tipTimer = null;
 function tip(msg, ms) {
   const t = $('toast'); t.textContent = msg; t.style.display = 'block';
@@ -507,6 +522,9 @@ window.addEventListener('unhandledrejection', e => errLocal('异步', e.reason))
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function (u, o) {
   o = o || {};
+  if (typeof u === 'string' && u.charAt(0) === '/' && needSetup(true)) {
+    return Promise.reject(new Error('还没填服务地址（我 → 设置）'));
+  }
   if (TOKEN && typeof u === 'string' && u.indexOf(BASE) === 0) {
     try {
       const h = new Headers(o.headers || {});
@@ -1763,6 +1781,9 @@ async function checkUpdate(manual) {
       setTimeout(() => sp.style.display = 'none', 480);
     }, 900);
   } else $('splash').style.display = 'none';
+  // 服务地址没填就先别发请求（每个都会失败，日志刷一片"连不上"，
+  // 反而把真正的原因埋掉）。直接把人送到设置页。
+  if (needSetup(false)) { setTimeout(testConn, 300); return; }
   loadHistory(true);
   loadPersonaName();
   loadStickers();

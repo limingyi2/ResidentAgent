@@ -86,6 +86,41 @@ public class MainActivity extends Activity {
         else startService(svc);
 
         web.loadUrl("file:///android_asset/chat.html");
+        // 页面自己的 localStorage 会被"清除 WebView 数据 / 换包名重装"清空，
+        // 而原生这边存的 base/token 还在（它跟着 App 数据走，清 WebView 不清它）。
+        // 所以把原生存过的值回灌一次 —— 否则用户明明填过一次，页面却当没填过，
+        // 每个请求都发成相对路径，表现成"连接不到网络"。
+        SharedPreferences sp = getSharedPreferences("zx", MODE_PRIVATE);
+        final String savedBase = sp.getString("base", "");
+        final String savedToken = sp.getString("token", "");
+        web.postDelayed(new Runnable() {
+            @Override public void run() {
+                web.evaluateJavascript(
+                        "(function(){try{"
+                        + "if(!localStorage.getItem('zx_base')&&" + jsStr(savedBase) + ")"
+                        + "localStorage.setItem('zx_base'," + jsStr(savedBase) + ");"
+                        + "if(!localStorage.getItem('zx_token')&&" + jsStr(savedToken) + ")"
+                        + "localStorage.setItem('zx_token'," + jsStr(savedToken) + ");"
+                        + "return !!localStorage.getItem('zx_base');}catch(e){return false}})()",
+                        value -> {
+                            // 回灌成功且页面本来就空 -> 让它按新地址重新拉一次
+                            if ("true".equals(value)) web.evaluateJavascript("location.reload()", null);
+                        });
+            }
+        }, 800);
+    }
+
+    /** 把 Java 字符串安全地转成 JS 字面量（防注入 + 防反斜杠/引号被吃掉）。 */
+    private static String jsStr(String s) {
+        StringBuilder sb = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\\') sb.append('\\').append(c);
+            else if (c == '\n' || c == '\r') sb.append("\\n");
+            else if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+            else sb.append(c);
+        }
+        return sb.append('"').toString();
     }
 
     @Override

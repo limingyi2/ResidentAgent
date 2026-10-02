@@ -38,9 +38,44 @@ gradle = os.path.join(AND, "gradle-8.7", "bin", "gradle.bat")
 if not os.path.exists(gradle):
     raise SystemExit("没找到 gradle：请把 ANDROID_TOOLS 指到正确的目录（当前 %s）" % AND)
 
-p = subprocess.run([gradle, "-p", ROOT, "assembleDebug", "--no-daemon"],
-                   capture_output=True, text=True, encoding="utf-8",
-                   errors="replace", env=env, timeout=500)
+# --- 构建前把服务地址/口令注入 assets/chat.html，构建完还原 -------------
+# 为什么必须注入而不是让用户手填：改安卓包名等于装了一个"全新 App"，Android
+# 会给它一份空的 localStorage，而 chat.html 的 DEF_BASE 是空串 —— 于是每个
+# fetch 都把 "/api/xxx" 当成本地相对路径去 file:/// 下找，必然失败，用户只看到
+# "连接不到网络"。让人每次换包名都手动重填一次地址，既烦又容易填错。
+# 注入只在本地构建时发生，仓库里那份 chat.html 始终是空占位（不能泄露地址/口令）。
+CONN = os.path.join(os.path.dirname(ROOT), "brain", "config", "app_conn.json")
+ASSET = os.path.join(ROOT, "app", "src", "main", "assets", "chat.html")
+backup = None
+if os.path.exists(CONN):
+    import json
+    conn = json.load(open(CONN, encoding="utf-8"))
+    base = str(conn.get("base") or "").strip().rstrip("/")
+    token = str(conn.get("token") or "").strip()
+    if base and token:
+        src = open(ASSET, encoding="utf-8", newline="").read()
+        backup = src
+        out = src.replace("const DEF_BASE  = '';", "const DEF_BASE  = '%s';" % base, 1)
+        out = out.replace("const DEF_TOKEN = '';", "const DEF_TOKEN = '%s';" % token, 1)
+        if out == src:
+            print("!! 没找到 DEF_BASE/DEF_TOKEN 占位串，注入没生效（chat.html 结构变了？）")
+        else:
+            open(ASSET, "w", encoding="utf-8", newline="").write(out)
+            print("已注入服务地址:", base)
+    else:
+        print("app_conn.json 里 base/token 为空，跳过注入（用户需手填一次）")
+else:
+    print("没有 %s，跳过注入（用户需在 App 设置里手填一次）" % CONN)
+
+try:
+    p = subprocess.run([gradle, "-p", ROOT, "assembleDebug", "--no-daemon"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", env=env, timeout=500)
+finally:
+    # 还原：仓库里那份必须保持空占位，否则 git diff 会脏、地址/口令可能进仓库
+    if backup is not None:
+        open(ASSET, "w", encoding="utf-8", newline="").write(backup)
+        print("已还原 assets/chat.html（仓库版本保持空占位）")
 print("RC", p.returncode)
 
 apk = os.path.join(ROOT, "app", "build", "outputs", "apk", "debug", "app-debug.apk")

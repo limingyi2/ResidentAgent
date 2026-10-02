@@ -10,6 +10,7 @@
 import hashlib
 import os
 import re
+import subprocess
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -305,6 +306,68 @@ class TestNoHardcodedIdentity(unittest.TestCase):
         self.assertNotIn("地区：", src, "资料页还写死了地区")
         self.assertIn("data-her-id", src,
                       "ID 没走 data-her-id，人设名变了它不会跟着变")
+
+
+class TestServiceAddrNotCommitted(unittest.TestCase):
+    """仓库版 chat.html 必须保持空占位 —— 地址和口令是构建时注入的。
+
+    背景：换安卓包名等于装了个"全新 App"，localStorage 是空的，而
+    `DEF_BASE` 是空串时每个 fetch 都把 "/api/xxx" 当本地相对路径，
+    必然失败、用户只看到"连接不到网络"。所以本地打包时会用
+    `brain/config/app_conn.json`（gitignore）把真实地址注入 APK。
+    **注入只发生在构建那一刻**，仓库里这份必须还是空的 ——
+    否则云机公网 IP 和 brain_token 就跟着进公开仓库了。
+    """
+
+    def test_def_base_is_empty_placeholder(self):
+        m = re.search(r"const DEF_BASE\s*=\s*'([^']*)'", _src())
+        self.assertIsNotNone(m, "找不到 DEF_BASE 占位串")
+        self.assertEqual(m.group(1), "",
+                         "仓库版 chat.html 里 DEF_BASE 被写成了真实地址，"
+                         "云机 IP 会跟着进公开仓库；真实地址应由 "
+                         "deploy/rebuild_apk.py 在构建时注入")
+
+    def test_def_token_is_empty_placeholder(self):
+        m = re.search(r"const DEF_TOKEN\s*=\s*'([^']*)'", _src())
+        self.assertIsNotNone(m, "找不到 DEF_TOKEN 占位串")
+        self.assertEqual(m.group(1), "",
+                         "仓库版 chat.html 里 DEF_TOKEN 被写成了真实口令")
+
+    def test_no_public_ip_or_brain_token_in_html(self):
+        """再兜一层：不管写成什么形式，HTML 里不该出现 IPv4 或长十六进制口令。"""
+        src = _src()
+        for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", src):
+            self.assertTrue(ip.startswith("203.0.113."),
+                            "chat.html 里出现真实 IP：%s" % ip)
+        # brain_token 是 12 位小写十六进制；doc 里也提过云端地址，一并排除
+        for tok in re.findall(r"\b[0-9a-f]{12}\b", src):
+            self.fail("chat.html 里出现疑似 brain_token：%s" % tok)
+
+    def test_app_conn_is_gitignored(self):
+        """带云机 IP 和口令的注入源文件绝不能入库。"""
+        conn = os.path.join(ROOT, "brain", "config", "app_conn.json")
+        if not os.path.isfile(conn):
+            self.skipTest("本机还没有 app_conn.json（没打过包）")
+        r = subprocess.run(["git", "check-ignore", "-q", conn], cwd=ROOT)
+        self.assertEqual(r.returncode, 0,
+                         "brain/config/app_conn.json 没被 gitignore —— "
+                         "它里面有云机公网 IP 和 brain_token")
+
+    def test_empty_base_is_reported_not_silent(self):
+        """没填地址时必须有明确提示，不能静默失败。
+
+        静默失败时用户看到的是 "Failed to fetch"，翻译成人话就是
+        "网络不通" —— 会往手机网络、代理、服务器上找半天，
+        而真实原因（地址没填）根本不在这些地方。
+        """
+        src = _src()
+        self.assertIn("function needSetup(", src,
+                      "缺 needSetup()：地址为空时会静默失败")
+        m = re.search(r"function needSetup\([^)]*\)\s*\{(.*?)\n\}", src, re.S)
+        self.assertIsNotNone(m, "needSetup 函数体解析不了")
+        body = m.group(1)
+        self.assertIn("errLocal(", body, "地址为空时要记一笔，否则日志里看不到原因")
+        self.assertIn("settings", body, "地址为空时要把人送到设置页")
 
 
 if __name__ == "__main__":
