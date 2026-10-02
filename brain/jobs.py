@@ -7,7 +7,7 @@
 - 主动搭话（自适应间隔）  静默时段/每日上限/被回应率全算进去
 - 事件提醒（30 分钟）    快递进展 + 天气突变，走主动搭话同一条路弹通知
 
-所有循环的共同纪律：出错打印一行继续跑，绝不能让任何一根线程把进程带崩。
+所有循环的共同纪律：出错打印一行继续跑，别让任何一根线程把进程带崩
 """
 import time
 import threading
@@ -122,8 +122,8 @@ def _moment_loop(b):
     first = True
     while True:
         try:
-            # 启动后 150s 先快跑一次，保证"今天有东西可看"，别让用户重启完干等一小时；
-            # 刚种过开场圈就跳过这次，免得两分钟内连发两条。之后恢复每小时一次
+            # 启动后 150s 先快跑一次，保证"今天有东西可看"。刚种过开场圈就
+            # 跳过这次，免得两分钟内连发两条，之后恢复每小时一次
             time.sleep(150 if first else 3600)
             if first and (time.time() - _SEEDED_AT["t"]) < 1500:
                 first = False
@@ -137,8 +137,7 @@ def _moment_loop(b):
                 _trace_loop("moment", posted=1, chars=len(raw or ""))
                 print("[大脑] 她发了一条朋友圈", flush=True)
             else:
-                # 必须把原话打出来：她可能只是"这轮不想发"，也可能是格式跑偏，
-                # 只看"没发"分不清这两种情况
+                # 必须把原话打出来：她可能只是"这轮不想发"，也可能是格式跑偏
                 _trace_loop("moment", posted=0, raw=(raw or "")[:80])
                 print("[大脑] 朋友圈：这轮没发，她的原话＝%s"
                       % raw.replace("\n", " / ")[:140], flush=True)
@@ -156,7 +155,7 @@ def _proactive_loop(b):
             base = int(pa.get("interval_sec") or 2400)
             interval = base
             if pa.get("adaptive", True):
-                # 自适应频率的伸缩上限 2 小时 —— 再冷也别变成半小时一条，那已经算骚扰
+                # 伸缩上限 2 小时。再冷也别变成半小时一条，那已经算骚扰
                 interval = int(base * _proactive_interval_multiplier())
                 cap = int(pa.get("max_interval_sec") or 7200)
                 interval = min(interval, cap)
@@ -176,7 +175,7 @@ def _proactive_loop(b):
                 print("[大脑] 静默时段（%s~%s），这轮不主动搭话"
                       % (qs, qe), flush=True)
                 continue
-            # 每日上限：她一天主动几十条比不说话更烦人
+            # 每日上限：一天几十条比不说话更烦人
             cap = int(pa.get("max_per_day") or 99)
             used = _proactive_used_today()
             if used >= cap:
@@ -198,9 +197,8 @@ def _proactive_loop(b):
                 _trace_loop("proactive", sent=0, reason="标签解析后为空")
                 continue
             text = resolve_voice_tag(text, API_CFG)
-            # 去重闸门：她最近已经说过（或截一段说过）就不发第二遍，
-            # 原因见 proactive._recent_her_texts —— 主动搭话会复述上下文里
-            # 自己刚说的话
+            # 去重闸门：最近说过（或截一段说过）就不发第二遍。主动搭话会
+            # 复述上下文里自己刚说的话，见 proactive._recent_her_texts
             if _is_repeat_of_recent(text):
                 print("[大脑] 主动搭话：和最近说过的话重复，这轮不发",
                       flush=True)

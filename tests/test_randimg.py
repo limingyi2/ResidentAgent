@@ -89,10 +89,10 @@ class TestRandTagResolve(unittest.TestCase):
         self.assertEqual(self._calls, [])
 
     def test_generated_tag_survives_cleanup(self):
-        # **原 bug 的回归用例**。
-        # 真实文件名就叫 rand_20261002_abcd.jpg（以 rand 开头），而旧的收尾
-        # 清扫正则含 rand[^]]*，会把刚生成成功的 [img:rand_...jpg] 当残留删掉 ——
-        # 于是图拉到了、标签却被自己清掉，她"啥也没发"，且必现。
+        # 原 bug 的回归用例。真实文件名就叫 rand_20261002_abcd.jpg（以 rand
+        # 开头），旧的收尾清扫正则含 rand[^]]*，会把刚生成成功的
+        # [img:rand_...jpg] 当残留删掉 —— 图拉到了、标签却被自己清掉，
+        # 她"啥也没发"，且必现
         # 这个用例就是钉死它：生成出来的标签必须原样活到输出。
         self._stub("rand_20261002_abcd.jpg")
         out = randimg.resolve_rand_tags("喏\n[rand:bq]", "发个表情包")
@@ -110,7 +110,7 @@ class TestRandTagResolve(unittest.TestCase):
     def test_no_broken_tag_left_in_any_case(self):
         # 残留的 rand 标签漏到用户侧 = App 404 裂图，任何分支都不能漏。
         # 注意别写成 assertNotIn("[img:rand") —— 合法图片标签恰恰长这样
-        # （[img:rand_20261002_abcd.jpg]，文件名以 rand 开头），那是**成功**的标志。
+        # （[img:rand_20261002_abcd.jpg]，文件名以 rand 开头），那是成功的标志
         # 这里只查两类真残留：还带分类名的（[rand:bq] / [img:rand:bq]）、
         # 以及没闭合的半截标签（[rand）。
         for stub_ret, ask in (("ok.jpg", "发图"), ("", "发图")):

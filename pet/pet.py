@@ -22,8 +22,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "brain"))  # 云端大�
 
 
 # --- 单实例：同一时间只允许一个桌宠 ---
-# 看门狗拉起 / 开机自启 / 手动双击，任何入口都能再起一个，每个都建一套窗口，
-# 于是桌面叠了十几个。用 Windows 命名互斥量跨进程兜住，第二个实例启动即退出。
+# 看门狗拉起 / 开机自启 / 手动双击，任何入口都能再起一个，桌面就叠了十几个。
+# 用 Windows 命名互斥量跨进程兜住，第二个实例启动即退出
 _INSTANCE_MUTEX = None
 
 
@@ -34,8 +34,8 @@ def ensure_single_instance(name="LinZhixiaPet"):
     try:
         import ctypes
         # 必须用 WinDLL(use_last_error=True) + ctypes.get_last_error()。
-        # 用 ctypes.windll 再调 kernel32.GetLastError() 的话，ctypes 自己的调用会把 LastError
-        # 冲掉，拿回来的几乎总是 0，"已经有实例在跑"永远判断不出来 —— 每双击一次就多一个她。
+        # 走 ctypes.windll 再调 kernel32.GetLastError() 的话，ctypes 自己的调用会
+        # 把 LastError 冲掉，拿回来几乎总是 0，"已有实例在跑"永远判断不出来
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         mutex = kernel32.CreateMutexW(None, False, "Global\\%sSingleInstance" % name)
         err = ctypes.get_last_error()
@@ -66,8 +66,8 @@ try:
     paths.ensure()                       # 顺手把该有的目录建出来
 except Exception:
     CFG_PATH = r"F:\zhixia\brain\config\config.json"
-# 立绘实际放在 brain/assets/ 下（pet/assets/ 里从来没有过这些图）。
-# 只认一处的话三张图全读不到，窗口只显示「立绘读不到」几个字。两个位置都认。
+# 立绘实际在 brain/assets/ 下（pet/assets/ 里从来没过这些图）。只认一处的话
+# 三张图全读不到，窗口只显示「立绘读不到」几个字，所以两个位置都认
 _ASSETS_SELF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 _ASSETS_BRAIN = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brain", "assets")
@@ -81,12 +81,12 @@ if os.path.exists(CFG_PATH):
 
 
 # --- 置顶保活（Windows 原生，见 _TopMostGuard） ---
-# 不能只靠 Qt 的 WindowStaysOnTopHint：点一下别的置顶窗口（悬浮窗 / 桌面歌词 / 输入法
-# 候选框 / 游戏启动器）就会升到置顶带更上面把她盖住，而她自己的 WS_EX_TOPMOST 其实还在，
-# Qt 对此一无所知、也不会主动抢回来。
-# 所以两件事一起做，**只在她该置顶时生效**（用户选"沉底"时一律不插手）：
-#   · 定期 SetWindowPos(HWND_TOPMOST) 把她拎回置顶带最上面（已是最上面时是空操作）
-#   · 原生事件过滤器拦 WM_WINDOWPOSCHANGING，谁想把她改成"非置顶"就当场改回去
+# 不能只靠 Qt 的 WindowStaysOnTopHint：点一下别的置顶窗口（悬浮窗 / 桌面歌词 /
+# 输入法候选框 / 游戏启动器）人家会升到置顶带更上面把她盖住，而她的
+# WS_EX_TOPMOST 其实还在，Qt 对此一无所知也不会主动抢回来。
+# 所以两件事一起做，只在她该置顶时生效（用户选"沉底"时不插手）：
+#   · 定期 SetWindowPos(HWND_TOPMOST) 把她拎回最上面
+#   · 事件过滤器拦 WM_WINDOWPOSCHANGING，谁想改成非置顶就当场改回去
 WM_WINDOWPOSCHANGING = 0x0046
 GWL_EXSTYLE = -20
 WS_EX_TOPMOST = 0x00000008
@@ -511,7 +511,7 @@ class ChatDialog(QDialog):
         self.pet = pet
         self._last_ts = 0.0
         # 标题取人设名（云端 /api/persona 拉回来的），拉不到就用通用名。
-        # 不写死角色名 —— 换人设不用改代码。
+        # 不写死角色名，换人设不用改代码
         who = ""
         try:
             who = str((getattr(pet, "brain", None) or {}).persona.get("name") or "").strip()
@@ -592,8 +592,8 @@ class ChatDialog(QDialog):
         try:
             past = self.pet.brain.read_history(40)
         except Exception as e:
-            # 以前这里静默吞掉：read_history 在 RemoteBrain 上不存在，属性错误
-            # 被吃成 past=[]，表现是"每次启动聊天窗都空的"，查起来毫无线索
+            # 早先这里静默吞掉：read_history 在 RemoteBrain 上不存在，属性错误被
+            # 吃成 past=[]，表现是"每次启动聊天窗都空的"，查起来毫无线索
             print(f"[桌宠] 读聊天存档失败（聊天窗会是空的）：{e}", flush=True)
             past = []
         self.restore(past)
@@ -1211,10 +1211,9 @@ class PetWindow(QLabel):
         if r != QMessageBox.StandardButton.Yes:
             return
         try:
-            # 远程模式下打云上的 /api/history/clear：存档只有云上那一份。
-            # 以前是 from brain import Brain; Brain.clear_history() —— 删的是**本机**
-            # 文件，云上那份一动不动，而且文件不存在时 OSError 还会逃出去，
-            # 连带把下面的 dlg.clear_all() 一起跳过（界面看着根本没清）。
+            # 远程模式下打云上的 /api/history/clear，存档只有云上那一份。
+            # 早先调本地 Brain.clear_history() 删的是本机文件，云上那份不动，
+            # 而且文件不存在时 OSError 会逃出去，连带把 dlg.clear_all() 一起跳过
             self.brain.clear_history()
         except Exception as e:
             print("[桌宠] 清空云上聊天存档失败：", e, flush=True)

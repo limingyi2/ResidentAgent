@@ -36,8 +36,8 @@ SLOTS = [
 ]
 SLEEP = "深夜"
 
-# 时段名 -> 该时段的大致中点（分钟），用于算"这件事过去多久了"。
-# 不算这个她就会把中午的事说到下午还带个"刚"字 —— 时间观念稀碎。
+# 时段名 -> 该时段的大致中点（分钟），用来算"这件事过去多久了"。
+# 不算的话她会把中午的事说到下午还带个"刚"字。
 _SLOT_MID = {
     "早上": 8 * 60,
     "上午": 10 * 60 + 30,
@@ -60,8 +60,7 @@ def _slot_gap_text(slot, now):
     h = diff / 60.0
     return "约1小时前" if h < 1.5 else f"约{int(round(h))}小时前"
 
-# 一天的「底色」：按日期轮换，免得她天天都是同一种顺顺当当的日常。
-# 用日期取模选 —— 同一天不管重算几次都是同一个，不会前后打架。
+# 一天的「底色」，按日期轮换。按日期取模选，同一天重算几次都是同一个
 TONE_HINTS = (
     "平平常常的一天，没什么特别的事",
     "很普通的一天，但有件小事让你挺开心",
@@ -93,9 +92,9 @@ except Exception:                        # 兜底：路径规则变了也不至�
     WORLD_PATH = os.path.join(_HERE, "config", "world.json")
     LOCK_PATH = os.path.join(_HERE, "data", "run", "catchup.lock")
 
-# 跨进程锁：桌宠和其它入口是两个进程，可能同时开着。
-# threading.Lock 管不了跨进程，两边一起补算会重复烧 token、还可能写出重复经历
-LOCK_STALE = 300                    # 秒：补算最多几十秒，超过这个时长就当成残留锁
+# 跨进程锁：桌宠和其它入口是两个进程，可能同时开着。threading.Lock 管不了
+# 跨进程，两边一起补算会重复烧 token、还可能写出重复经历
+LOCK_STALE = 300                    # 秒：补算最多几十秒，超过就当成残留锁
 
 DEFAULT_WORLD = {
     "_说明": (
@@ -125,9 +124,9 @@ DEFAULT_WORLD = {
 }
 
 
-# --- 让模型生成世界（比代码随机更自然、更多样） ---
-# 代码随机只有写死的十几个专业 / 城市可选，一眼模板感。真正"真人随机感"得交给模型：
-# 本地 27B 优先（零成本），云端兜底，都不可用才回退代码随机
+# --- 让模型生成世界 ---
+# 代码随机只有写死的十几个专业 / 城市可选，一眼模板感。本地 27B 优先（零成本），
+# 云端兜底，都不可用才回退代码随机
 _WORLD_PROMPT = (
     "你是角色设定生成器。帮虚拟陪伴角色随机生成一套真实可信的中国女大学生活设定。\n\n"
     "要求：\n"
@@ -183,7 +182,7 @@ def _gen_world_http(base_url, api_key, model, max_tokens=900, timeout=60):
     except Exception:
         return None
 
-    # 从返回里抠 JSON（模型可能夹带解释或 ```json 围栏）
+    # 抠 JSON（模型可能夹带解释或 ```json 围栏）
     try:
         a = text.find("{")
         b = text.rfind("}")
@@ -200,7 +199,7 @@ def _gen_world_http(base_url, api_key, model, max_tokens=900, timeout=60):
         v = raw.get(k)
         if isinstance(v, str) and v.strip():
             w[k] = v.strip()
-    # 专业/学校/城市是硬约束，缺失就不采纳（让上层回退）
+    # 专业/学校/城市缺一就不采纳，让上层回退
     if not (w.get("school") and w.get("city") and w.get("major")):
         return None
     rms = raw.get("roommates")
@@ -334,8 +333,8 @@ class LifeEngine:
         self.timeout = timeout
         self.name = name
         self.home = home or LIFE_DIR
-        # 自定义 home 是测试用的：journal 挨着它放。world.json 已经搬到 config/ 了
-        # （它是"你会手动改的设定"，不跟经历流混在一起），所以这里永远指向 WORLD_PATH
+        # 自定义 home 只给测试用，journal 挨着它放。world.json 单独在 config/
+        # 下（属于"你会手动改的设定"，不跟经历流混一起）
         self.journal_dir = os.path.join(home, "journal") if home else JOURNAL_DIR
         self.world_path = WORLD_PATH
         os.makedirs(self.home, exist_ok=True)
@@ -347,7 +346,7 @@ class LifeEngine:
 
     # --- 她的世界 ---
     def load_world(self):
-        # world.json 不在（首次启动 / 被清空）-> 让模型生成一份（本地27B优先/云端兜底），都不行才代码随机
+        # 没有就生成一份（本地 27B 优先 / 云端兜底），都不行才代码随机
         if not os.path.exists(self.world_path):
             w = self._gen_world_first_time()
             if w is not None:
@@ -393,8 +392,8 @@ class LifeEngine:
         return w
 
     def save_world(self, world):
-        # newline="\n" 不能省：不给的话 Windows 文本模式会把换行写成 CRLF，
-        # 云端那份就跟仓库那份天天"字节不一致、内容一模一样"，比对时非常误导
+        # newline="\n" 不能省。不给的话 Windows 文本模式写成 CRLF，云端那份就跟
+        # 仓库那份天天"字节不一致、内容一模一样"，比对时非常误导
         json.dump(world, open(self.world_path, "w", encoding="utf-8", newline="\n"),
                   ensure_ascii=False, indent=2)
         self.world = world
@@ -434,8 +433,8 @@ class LifeEngine:
                 bits.append(f"- 社团：{c}")
         if w.get("notes"):
             bits.append("- " + str(w["notes"]))
-        # 天气只读缓存（weather_cache 刷的），城市跟他的 IP 走 —— 这是"他那边"的天气，
-        # 她拿来关心他，不是自己的。取不到就不提，聊天不为它多等一秒
+        # 天气只读缓存，城市跟他的 IP 走 —— 是"他那边"的天气，她拿来关心他。
+        # 取不到就不提，聊天不为它多等一秒
         try:
             import features as _feat
             if _feat.on("weather"):
@@ -446,7 +445,7 @@ class LifeEngine:
                     bits.append(f"- 他那边（{loc}）现在的天气：{wx}")
         except Exception:
             pass
-        # 热搜也是缓存喂的。措辞是"她刚刷到"，不是新闻播报 —— 别让她念榜单
+        # 热搜措辞是"她刚刷到"，不是新闻播报，别让她念榜单
         try:
             import features as _feat
             if _feat.on("hotboard"):
@@ -462,8 +461,8 @@ class LifeEngine:
         if br:
             bits.append(f"- 你现在在{br.get('name', '假期')}里"
                         f"（{br.get('start')}~{br.get('end')}），学校不上课，一天都是你自己的")
-            # 假期进度由代码算好，模型只管照着说 —— 让它自己算日期，
-            # 它会顺着对方说（他把假期第一天说成最后一天，她就接了）
+            # 假期进度由代码算好。让模型自己算日期的话，他会顺着对方说
+            # —— 他把第一天说成最后一天，她就接了
             try:
                 s = datetime.date.fromisoformat(br["start"])
                 e = datetime.date.fromisoformat(br["end"])
@@ -475,13 +474,13 @@ class LifeEngine:
                             "他说的日期跟这里对不上时按这里为准，可以直接纠正他")
             except Exception:
                 pass
-            # 假期人在哪：不写的话她默认还待在学校（国庆待在空宿舍）
+            # 假期人在哪。不写的话她默认还待在学校（国庆待在空宿舍）
             hp = self.world.get("holiday_plan") or {}
             if (hp.get("text") and hp.get("start") and hp.get("end")
                     and hp["start"] <= ds <= hp["end"]):
                 bits.append(f"- 这次的安排：{hp['text']}，说话做事按这个来")
         elif not self._calendar_known(ds):
-            # 校历没维护到这天：让她含糊其辞，而不是编个笃定的答案
+            # 校历没维护到这天，让她含糊其辞而不是编个笃定的答案
             bits.append("- 这天的放假安排还没出通知，你自己也不确定，"
                         "别把有没有课、放不放假说死，要用「应该 / 大概 / 还不确定」的口气")
         return "\n".join(bits)
@@ -514,8 +513,7 @@ class LifeEngine:
                 return {"name": "寒假" if gs.month in (12, 1, 2) else "暑假",
                         "start": gs.isoformat(), "end": ge.isoformat(),
                         "derived": True}
-        # 学期列表的"尾巴"后面没有下一个学期来框住暑假，按高校惯例推到 8/31：
-        # 新学期基本都在 9 月初开课。往 semesters 补了下一条学期后，这条就不生效了
+        # 学期列表的"尾巴"后面没有下一条学期来框住暑假，按惯例推到 8/31
         if sems:
             try:
                 gs = datetime.date.fromisoformat(sems[-1]["end"]) + datetime.timedelta(days=1)
@@ -733,11 +731,11 @@ class LifeEngine:
             "事情堆一起那种烦和累。别每个时段都平铺直叙地说“做了什么”",
         ]
         if br:
-            # derived = 寒暑假，是按学期排推导出来的，提示里也交代一句，免得她自己都心虚
+            # derived = 寒暑假是按学期排推导的，提示里交代一句免得她心虚
             tag = "（按学期排的）" if br.get("derived") else ""
             p.append(f"- 你在{br.get('name', '假期')}里{tag}，别写上课、老师、实验室、"
                      "作业、交报告 —— 学校根本没人")
-            # 光说"别写上课"她容易写干巴巴的"在家休息"；把放假该干的事摆出来才像人话
+            # 光说"别写上课"她容易写干巴巴的"在家休息"，把该干的事摆出来才像人话
             p.append("- 写放假真会做的事：追剧、打游戏、回家、逛街、跟朋友瞎逛、睡到中午；"
                      "寒假可以惦记过年、收红包、被亲戚问成绩，暑假可以嫌热，"
                      "临开学可以不想开学 —— 作息乱一点也没关系")

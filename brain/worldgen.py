@@ -233,7 +233,7 @@ def main():
     json.dump(w, open(WORLD_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print("[世界] 已生成随机身份：%s · %s · %s · %s"
           % (w["city"], w["school"], w["grade"], w["major"]))
-    print("[世界] ⚠️ 学校/专业变了，她以前的经历和日记会穿帮。需要清空重来：")
+    print("[世界] 注意：学校/专业变了，她以前的经历和日记会穿帮。需要清空重来：")
     print("       删掉 data/her_life/events.jsonl、data/her_life/state.json 和 "
           "data/journal/ 下的文件，重启桌宠即可。")
 

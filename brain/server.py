@@ -110,19 +110,16 @@ def build_local_brain(verbose=True):
     return b
 
 
-# 聊天锁的等待上限（秒）。这个数得**算出来**，不能拍：
-#   一轮 brain.chat 最坏 = 模型 60s + 重试间隔 1.5s + 重试 60s = 121.5s
-#   工具轮最多两次 chat（首次判断 + 喂回结果重答）      = 243s
-#   UAPI 那次真实调用最坏 = 6s × 2 次机会               = 12s
-#   合计约 255s（图片/语音的合成在锁外，不算）
-# 取 300 给它留余量。超了就明说"在忙"，而不是像以前那样无超时地挂着
-# （一个卡住的请求能把后面所有人无限期堵死）。
-# 注意：客户端自己的超时更短（桌宠 POST 90s、浏览器默认约 300s），
-# 所以真正先放弃的通常是客户端 —— 这个上限主要是别让服务端线程无限期占着。
+# 聊天锁的等待上限（秒），算出来的不是拍的：
+#   一轮 chat 最坏 = 60s + 重试间隔 1.5s + 重试 60s = 121.5s
+#   工具轮最多两次 chat = 243s
+#   UAPI 调用最坏 = 6s × 2 = 12s
+#   合计约 255s，图片/语音的合成在锁外。取 300 留余量。
+# 超了明说"在忙"。以前无超时地挂着，一个卡住的请求能把后面全堵死。
 CHAT_LOCK_WAIT = 300
 
-# 单次请求体上限（字节）。正常聊天几 KB，带图 base64 也就几 MB；
-# 12MB 足够用，同时挡住"报个超大 Content-Length 把内存打满"这条路。
+# 单次请求体上限。带图 base64 也就几 MB，12MB 够用，
+# 顺便挡掉"报个超大 Content-Length 把内存打满"。
 MAX_BODY = 12 * 1024 * 1024
 
 
@@ -201,10 +198,9 @@ def _chat_with_tools(text, img_path, trace_out=None):
         with _chat_lock():
             b = _LOCAL["brain"]
             ans, mode = b.chat(t, img=img_path, log=False)
-            # trace 字段长在共享的大脑对象上，必须趁锁还在手里抄一份 ——
-            # 出了锁再读，并发的那一轮会把它覆盖掉（trace 张冠李戴）。
-            # 每轮都覆盖：工具调用会走两轮 chat，用户看到的是**最后一轮**的结果，
-            # 记第一轮的数字等于记错了那一轮（早先写成 `not trace_out` 就踩了这个）。
+            # trace 字段长在共享的大脑对象上，得趁锁还在手里抄。出了锁再读，
+            # 并发那一轮会把它覆盖掉。
+            # 每轮都覆盖：工具调用走两轮 chat，用户看到的是最后一轮的结果。
             if trace_out is not None:
                 trace_out.update(_snapshot(b))
             return ans, mode
@@ -212,8 +208,8 @@ def _chat_with_tools(text, img_path, trace_out=None):
     try:
         import features as _feat
         if not _feat.on("tools"):
-            # 开关关了不执行查询，但人设里的工具规则还在（prompt 是拼好的），
-            # 模型仍可能写标签 —— 照样用宽口径清扫，绝不能漏给用户
+            # 开关关了不执行查询，但 prompt 是拼好的，模型仍可能写工具标签，
+            # 照样清扫一遍
             import tools as _tools
             ans, mode = _once(text)
             return _tools.TOOL_TAG_ANY_RE.sub("", ans).strip(), mode
@@ -225,8 +221,7 @@ def _chat_with_tools(text, img_path, trace_out=None):
     ans, mode, used = _tools.run_chat_with_tools(_once, text)
     if used:
         print(f"[大脑] 她调用了工具 {used}", flush=True)
-        # 用过的工具要进 trace：以前这句话只打到 stdout，重启就没了，
-        # "这轮为什么答成那样"少了一半线索（调没调工具、调的哪个）
+        # 用过的工具要进 trace，否则重启后没法追"这轮为什么答成那样"
         if trace_out is not None:
             trace_out["tool"] = used
     return ans, mode
@@ -268,8 +263,8 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
                         f.write(base64.b64decode(img_b64))
                 except Exception as e:
                     print(f"[大脑] 图片存档失败（不影响回复）：{e}", flush=True)
-            # 他要自拍：不让模型“只打字不发图 / 用第三人称写场景”，直接照她此刻
-            # 的时间+地点现场生成一张，正文用第一人称短句
+            # 他要自拍：不指望模型"只打字不发图"，直接按她此刻的时间和地点
+            # 现场生成一张，正文用第一人称短句
             try:
                 if not img_b64 and _looks_like_selfie(text):
                     sp, place = _selfie_prompt(wear_override=_outfit_override(text))
@@ -285,19 +280,16 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
                         return ans, "本地自拍", ""
             except Exception as e:
                 print(f"[大脑] 自拍生成失败，回退正常对话：{e}", flush=True)
-            # 锁在 _chat_with_tools 的每轮 chat 里拿（带超时）：工具查询/二轮模型调用
-            # 都不该抱着锁等网络，否则她的主动搭话会被这条消息堵住
+            # 锁在 _chat_with_tools 的每轮 chat 里拿（带超时），别抱着锁等网络
             ans, mode = _chat_with_tools(text, img_path or None,
                                          trace_out=trace_out)
-            # 剥掉万一学出来的「说」标记；[gen:xxx] 现场生成真图换成 [img:名字]
+            # 剥掉学出来的「说」标记；[gen:xxx] 换成 [img:名字]
             look = _her_look()
             ans = resolve_gen_tags(strip_say_marker(ans), look)
-            # [rand:分类] 是她甩表情包/趣图的路子；壁纸类只有他点名才给
-            ans = resolve_rand_tags(ans, text)
-            # 她加了 [voice] 就合成真语音条（失败自动降级成纯文字）
+            ans = resolve_rand_tags(ans, text)   # [rand:分类] 表情包/趣图
             ans = resolve_voice_tag(ans, API_CFG)
-            # 存档记的是处理后的正文（带 [img:gen_xxx.png]，App 能直接显示）；
-            # 用户侧只存他真正说的话 —— 看图描述、快递系统提示只进模型，别进他的气泡
+            # 存档记处理后的正文（带 [img:gen_xxx.png]，App 能直接显示）。
+            # 用户侧只存他真正说的话，看图描述和快递提示别进他的气泡
             try:
                 _LOCAL["brain"]._log_turn(orig_text, ans, img=img_path or None)
             except Exception as e:
@@ -313,8 +305,7 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
     return "", "", "大脑没起来"
 
 
-# --- 发消息用的小工具（split_text / split_messages 搬进了 brain.py，
-#     /api/chat 的 messages 字段和聊天存档共用一份，别处再写会漂） ---
+# split_text / split_messages 搬进了 brain.py，/api/chat 的 messages 和存档共用一份
 from brain import split_messages
 
 
@@ -462,8 +453,8 @@ def start_remote_api(brain):
                 n = int(self.headers.get("Content-Length") or 0)
             except Exception:
                 n = 0
-            # 体积上限：带图的 /api/chat 走 base64，正常也就几 MB。
-            # 以前是 n 多大就读多大进内存，一个超大 Content-Length 就能把 2C2G 打满。
+            # 带图的 /api/chat 走 base64，正常也就几 MB。早先 n 多大就读多大，
+            # 一个超大 Content-Length 就能把 2C2G 打满。
             if n > MAX_BODY:
                 self._json(413, {"err": "body too large"})
                 return
@@ -476,8 +467,8 @@ def start_remote_api(brain):
                 if path == "/api/chat":
                     _in_text = str(body.get("text") or "")
                     _disp = _in_text          # 存档用原文，注入的系统提示不带
-                    # 快递意图：话里带单号就进监控（每30分钟自动查，有进展她主动说），
-                    # 现状塞给模型，她回话时能顺口告诉他"刚发出去了"
+                    # 话里带单号就进监控（每 30 分钟自动查），现状也塞给模型，
+                    # 她回话时能顺口说一句"刚发出去了"
                     try:
                         import features as _feat
                         if _feat.on("packages"):
@@ -506,9 +497,8 @@ def start_remote_api(brain):
                             errlog.warn("api/chat", f"{mode}：{err}")
                         except Exception:
                             pass
-                    # 每轮一行 trace：这轮怎么产生的（记忆命中/块大小/延迟/token）。
-                    # 字段来自 _snap（持锁时抄的），不在这里现读共享对象 —— 否则
-                    # 并发那一轮会把 last_hits/last_sizes 覆盖掉，trace 就张冠李戴
+                    # 每轮一行 trace：记忆命中 / 块大小 / 延迟 / token。
+                    # 字段取自 _snap（持锁时抄的），别在这里现读共享对象
                     try:
                         _ag = 0
                         try:
@@ -535,8 +525,8 @@ def start_remote_api(brain):
                         })
                     except Exception:
                         pass
-                    # reply 整段保留（旧版 App 兼容）；messages 按她的换行拆好段，
-                    # 新版 App 逐条渲染成连发的气泡，存档也按这个粒度拆行
+                    # reply 整段保留给旧版 App；messages 按她的换行拆好段，
+                    # 新版 App 逐条渲染成连发气泡，存档也按这个粒度拆
                     self._json(200, {"reply": ans, "messages": split_messages(ans),
                                      "mode": mode, "err": err,
                                      "t": time.strftime("%Y-%m-%d %H:%M")})
@@ -570,10 +560,8 @@ def start_remote_api(brain):
                         return
                     self._json(200, {"ok": True})
                 elif path == "/api/history/clear":
-                    # 清空云上的聊天存档 + 她的内存上下文。
-                    # 桌宠/App 的"清空聊天记录"走这里 —— 存档只有云上这一份，
-                    # 以前桌宠直接调本地 Brain.clear_history()，删的是本机文件，
-                    # 云上那份一动不动，看着清了其实没清。
+                    # 存档只有云上这一份。早先桌宠直接调本地 Brain.clear_history()
+                    # 删的是本机文件，云上那份一动不动，看着清了其实没清。
                     ok = False
                     try:
                         from brain import Brain
@@ -588,8 +576,7 @@ def start_remote_api(brain):
                         pass
                     self._json(200, {"ok": ok})
                 elif path == "/api/life/catchup":
-                    # 桌宠开机/手动刷新时让云上把她的生活补到当前时刻。
-                    # 会调模型，慢（几秒到几十秒），客户端放在后台线程里等。
+                    # 会调模型，慢，客户端放在后台线程里等
                     try:
                         life = getattr(brain, "life", None)
                         if life is None:
@@ -605,7 +592,6 @@ def start_remote_api(brain):
                         self._json(200, {"ok": False, "events": 0, "diary": 0,
                                          "err": str(e)[:80]})
                 elif path == "/api/diary/write":
-                    # "让她现在写篇日记"：写到云上的 journal 目录（只有那一份）
                     try:
                         life = getattr(brain, "life", None)
                         ds = str(body.get("date") or "") \
@@ -626,8 +612,8 @@ def start_remote_api(brain):
                         return
                     self._json(200, {"ok": True})
                 elif path == "/api/persona/apply":
-                    # App 一键切换人设：改 config.json 的 persona_file + 热重载。
-                    # key 只认 personas/ 目录下已有的文件名（防路径穿越）。
+                    # 改 config.json 的 persona_file 再热重载。key 只认 personas/
+                    # 下已有的文件名（防路径穿越）
                     try:
                         import persona_store
                         key = os.path.basename(str(body.get("key") or ""))
@@ -644,8 +630,8 @@ def start_remote_api(brain):
                         cfg["persona_file"] = "personas/%s.json" % key
                         with open(config_path(), "w", encoding="utf-8") as f:
                             json.dump(cfg, f, ensure_ascii=False, indent=2)
-                        # 内存里的 api_config 必须同步改：reload_persona() 读的是内存的 persona_file，
-                        # 只写盘不改内存的话热重载会载回旧人设，App 的"当前"标记也永远停在第一套
+                        # 内存那份也要改：reload_persona() 读的是内存的 persona_file，
+                        # 只写盘的话会载回旧人设
                         api_config["persona_file"] = cfg["persona_file"]
                         with _chat_lock():
                             brain.reload_persona()
@@ -660,8 +646,8 @@ def start_remote_api(brain):
                     except Exception as e:
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/voice/apply":
-                    # 与人设切换同构，但**有两处内存要同步**：api_config（落盘的那份）和
-                    # API_CFG（voice.synth() 实际收到的浅拷贝）。只改一处会出现"看着换了、声音没变"
+                    # 同人设切换，但内存里要同步两处：api_config 和 API_CFG
+                    # （voice.synth() 实际收到的浅拷贝）。只改一处会"看着换了、声音没变"
                     try:
                         key = os.path.basename(str(body.get("key") or ""))
                         import voice
@@ -676,7 +662,7 @@ def start_remote_api(brain):
                         except Exception:
                             cfg = {}
                         cfg["voice"] = sub
-                        # 老配置备份一次就够，别每次点都盖一遍（盖了就没法回头）
+                        # 老配置备份一次就够，别每次点都盖
                         bak = config_path() + ".bak_voice"
                         if not os.path.exists(bak):
                             try:
@@ -688,8 +674,8 @@ def start_remote_api(brain):
                             json.dump(cfg, f, ensure_ascii=False, indent=2)
                         api_config["voice"] = sub
                         API_CFG["voice"] = sub
-                        # 换音色不用重启、不用重建 Brain：synth() 每次都现读配置。
-                        # 语音缓存按 (文本, 模型, 音色) 做 key，所以换完不会串音、也不会白花钱重合成
+                        # 不用重启也不用重建 Brain，synth() 每次现读配置。
+                        # 缓存按 (文本, 模型, 音色) 做 key，换完不串音
                         print(f"[大脑] 声音已切换为 {desc}（API_CFG 已同步）",
                               flush=True)
                         self._json(200, {"ok": True, "key": key, "desc": desc,
@@ -698,8 +684,8 @@ def start_remote_api(brain):
                         errlog.log_exc("api/voice/apply", e)
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/voice/preview":
-                    # 试听必须用一份**临时配置**去合成，绝不能顺手改全局 api_config / API_CFG，
-                    # 否则"试听"会变成"直接换掉她的声音"
+                    # 用一份临时配置去合成，别动全局 api_config / API_CFG，
+                    # 否则"试听"就变成"直接换掉她的声音"
                     try:
                         key = os.path.basename(str(body.get("key") or ""))
                         import voice
@@ -723,8 +709,8 @@ def start_remote_api(brain):
                         errlog.log_exc("api/voice/preview", e)
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/models/apply":
-                    # 写 config.json **并且**同步内存：只写盘没用 —— Brain 拿的是启动时
-                    # load_config() 那一份字典，不清空重填的话换了模型她还用旧的
+                    # 写盘之后要 clear + update 内存那份（Brain 拿的是启动时
+                    # load_config() 的字典），不然换了模型她还用旧的
                     try:
                         new_cfg, changed = model_hub.apply_cfg(api_config, body)
                         if not changed:
@@ -873,12 +859,11 @@ def start_remote_api(brain):
                     pass
                 self._json(200, {"name": name, "key": cur, "presets": presets})
             elif path == "/api/voices":
-                # 清单是 voice.VOICE_CATALOG 里的死数据，**不联网** ——
-                # 设置页必须永远打得开，不能因为平台抖动就变成一片空白
+                # 清单是 VOICE_CATALOG 里的死数据，不联网 —— 设置页必须永远打得开
                 try:
                     import voice
-                    # 扫一眼缓存目录，让 App 能顺手看到"这个声音攒了几条语音"
-                    # （不精确，只用来判断要不要清缓存，别当业务数据用）
+                    # 顺带扫一眼缓存目录，让 App 看到"这个声音攒了几条"，
+                    # 只用来判断要不要清缓存
                     try:
                         n_cache = len([f for f in os.listdir(voice.VOICE_DIR)
                                        if f.startswith("v_")])

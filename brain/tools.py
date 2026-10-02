@@ -12,10 +12,9 @@ import re
 TOOL_TAG_RE = re.compile(
     r"\[tool[:：]([A-Za-z_]+)(?:[:：]([^\]]*))?\]", re.IGNORECASE)
 
-# 兜底清扫用的**宽口径**：只要看着像 [tool:...] 就扫掉，名字不限字符集。
-# 执行用上面那个严的（名字必须在册），清扫用这个宽的 —— 模型会编名字，甚至编个中文的
-# （[tool:不存在:xx]）；宽口径匹配不到的话它会原样发到用户眼前，
-# 正好违反"标签绝不能漏进正文"这条硬规矩。
+# 兜底清扫用的宽口径：只要看着像 [tool:...] 就扫掉，名字不限字符集。
+# 执行用上面那个严的（名字必须在册），清扫用这个宽的 —— 模型会编名字甚至编个
+# 中文名（[tool:不存在:xx]），匹配不到就会原样发到用户眼前
 TOOL_TAG_ANY_RE = re.compile(r"\[tool[:：][^\]]*\]", re.IGNORECASE)
 
 
@@ -136,7 +135,7 @@ def run_chat_with_tools(chat_fn, text, max_rounds=2):
                 "现在用这个结果直接回答他，别再写任何工具标签）"
                 % (used, result if result else "查询失败，照实说查不到，别编"))
         ans, mode = chat_fn(text + "\n" + hint)
-    # 兜底清扫：两轮后还残留的标签（或压根没触发循环的）绝不能漏给用户。
-    # 这里用**宽口径**：连"模型编出来的名字"一起扫掉。
+    # 兜底清扫：两轮后还残留的（或压根没触发循环的）不能漏给用户。
+    # 这里用宽口径，连模型编出来的名字一起扫
     ans = TOOL_TAG_ANY_RE.sub("", ans or "").replace("  ", " ").strip()
     return ans, mode, used

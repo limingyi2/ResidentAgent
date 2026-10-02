@@ -237,9 +237,8 @@ def pending_rows(rows, upto):
             days += 1
         cnt += 1
         cut += 1
-    # 一批里只遇到过一天（或干脆没选中）→ 这一天自己就超了上限，只能硬切。
-    # 老代码写的是 `if cut == 0`，而 cut 在第一轮就至少是 1，那个分支永远不成立 ——
-    # 于是一天不管有多少条都会一次性喂给模型（实测 576 条全进一批）。
+    # 一批里只遇到过一天（或干脆没选中），这一天自己就超了上限，只能硬切。
+    # 老代码写的是 `if cut == 0`，而 cut 第一轮就至少是 1，那个分支永远不成立
     if days <= 1:
         cut = min(cut or BATCH_MAX, BATCH_MAX)
     sel = sel[:cut]
@@ -432,8 +431,7 @@ def tick(api=None, verbose=True, max_seconds=300):
                 if txt and _append_text(_day_path(day), txt):
                     segs += 1
                     chars += len(txt)
-            # 水位线一次推到底：那天压出"无"也算处理过了，
-            # 不然每次 tick 都会重压同一段（而且花的是真钱）。
+            # 水位线一次推到底，压出"无"也算处理过，不然每次 tick 都重压同一段
             upto = new_upto
             lines += len(sel)
         if lines:

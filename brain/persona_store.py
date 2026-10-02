@@ -19,10 +19,9 @@ except Exception:
     PERSONA_DIR = os.path.join(BASE, "config", "personas")
 DEFAULT_KEY = "default"
 
-# 兜底人设，只有在 personas/ 下读不到文件时才用到。
-# 基线是"老朋友"，不写恋爱框架。**留空是有意的** ——
-# 仓库里不预置任何具体角色，用户自己填 config/personas/*.json。
-# 什么都不填时她只会按 CORE_RULES 的底线说话，没有背景故事。
+# 兜底人设，personas/ 下读不到文件时才用到。基线是"老朋友"，不写恋爱框架。
+# 留空是有意的：仓库不预置具体角色，用户自己填 config/personas/*.json。
+# 什么都不填时她只按 CORE_RULES 的底线说话，没有背景故事。
 DEFAULT_PERSONA = {
     "name": "",
     "nicknames": [],
@@ -39,20 +38,16 @@ DEFAULT_PERSONA = {
 
 FIELDS = ["name", "nicknames", "background", "scene", "personality",
           "call_user", "notes", "appearance",
-          # label/desc 是**列表用的显示名与一句话说明**，不是人设内容：
-          # server.py 的 /api/persona 直接从 json 里读它们填 App 预设列表
-          # （"原版 · 老朋友" / "她自己过日子，顺手跟你说两句"）。
-          # 以前它们不在白名单里 → App 里编辑人设保存一次，save() 就把这两个
-          # 静默丢了，预设列表里那行描述变空（tests/test_persona.py 会抓到）。
+          # label/desc 只给列表用，不参与 build_system_text。
+          # 早先不在白名单里，App 里保存一次就把它们静默丢了
           "label", "desc"]
 
 # ============================================================================
-# 核心约束（CORE_RULES）—— 与"具体哪套人设"无关的身份底线，所有通道共用
-#
-# 放代码里而不是塞进 personas/*.json 的原因：7 套各抄一份会漂移，改一处得改七处；
-# 而且 App 设置页保存人设时只保留 FIELDS 白名单字段，写在 notes 里的内容会被覆盖掉。
-# 覆盖通道：聊天草稿、朋友圈、主动搭话（都从 build_system_text 取 persona_text）。
-# 生图提示词用的是 persona["appearance"]，不走这里，改这段不影响长得像不像。
+# 核心约束（CORE_RULES）—— 与具体哪套人设无关的身份底线，所有通道共用。
+# 不塞进 personas/*.json 是因为 7 套各抄一份会漂移，改一处得改七处；而且 App
+# 保存人设时只保留 FIELDS 白名单字段，写在 notes 里的会被覆盖。
+# 覆盖通道：聊天草稿、朋友圈、主动搭话。生图用的是 persona["appearance"]，
+# 改这段不影响长相。
 # ============================================================================
 CORE_RULES = (
     "\n\n"
@@ -81,8 +76,8 @@ CORE_RULES = (
     "- 聊这些的时候别往“你跟她什么关系”上扯，也别吃醋 —— 他是在分享他觉得好玩的东西。\n"
     "- 底线：你不知道自己是程序。这个话题不猜测、不回应、不接茬。"
 )
-# appearance（生图用的外貌描述）必须在 FIELDS 白名单里：不在的话 load() 会把它
-# 丢掉，各套人设的"长相"根本没被读。切换预设时脸要保持是同一个人，所以必须保留
+# appearance（生图用的外貌）必须在 FIELDS 白名单里，不在的话 load() 会丢掉，
+# 各套人设的"长相"根本没被读。切换预设时脸要保持是同一个人
 
 
 def key_from_config(api_config):
@@ -124,8 +119,8 @@ def list_personas():
                 label = key
             out.append((key, label))
     if not out:
-        # 一个 json 都没有（仓库里就是这个状态：人设留给用户自己填）。
-        # 名字不能取 DEFAULT_PERSONA["name"] —— 那是空串，界面上会显示成空白条目。
+        # 一个 json 都没有（仓库里就是这个状态）。名字不能取
+        # DEFAULT_PERSONA["name"]，那是空串，界面上会显示成空白条目
         out = [(DEFAULT_KEY, "（未设置 · 点这里新建）")]
     return out
 
@@ -184,8 +179,7 @@ def build_system_text(p):
     if nick:
         head += f"（小名{nick}）"
     head += "。"
-    # 视角说明：人设各字段里的"你"都指她自己、"他"指聊天对象 ——
-    # 不写清的话模型偶尔会把"你"理解成用户
+    # 人设各字段里的"你"指她自己、"他"指聊天对象，不写清模型偶尔会理解反
     head += "下面写的都是你自己；里面提到的“他”指跟你聊天的这个人。"
 
     body = "".join([
@@ -202,15 +196,14 @@ def build_system_text(p):
     notes = (p.get("notes") or "").strip()
     if notes:
         txt += "\n\n" + notes
-    # 核心约束固定缀在最后（放在末尾 = 离模型最近，权重最高）
-    txt += CORE_RULES
+    txt += CORE_RULES     # 固定缀在最后，末尾离模型最近、权重最高
     return txt
 
 
 def build_draft_rules(p):
     """跟人设相关的输出规则（称呼是可变的，其余是固定的行为约束）。"""
     call_user = (p.get("call_user") or "").strip()
-    # 人设没指定称呼就不给称呼规则。兜底写死"笨蛋"的话，所有没填称呼的人设
+    # 没指定称呼就不给称呼规则，兜底写死"笨蛋"的话所有没填的人设
     # 都会被染上打情骂俏的腔调
     call_line = f"- 可以自然地叫他“{call_user}”\n" if call_user else ""
     # 去 AI 味反模式清单（提炼自开源项目 Humanizer-ZH / 說人話 的模式库，

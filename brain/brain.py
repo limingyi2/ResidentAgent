@@ -46,9 +46,8 @@ def _day_segment(hour):
     return "深夜"
 
 
-# 对话记录里每条开头的方括号是时间标签（见 Brain._stamp / seed_history）。
-# 不说明的话模型会犯两种错：把标签当正文模仿，回话开头也写个 [09-29 06:18]；
-# 或者无视时间，把凌晨说的"25 号下午的票"当成此刻正在谈的事翻出来催。
+# 提示词里要说明时间标签的读法，否则模型会模仿 [09-29 06:18] 的格式，
+# 或者无视时间把凌晨说的"25 号下午的票"当成还没到的安排翻出来催。
 HIST_TIME_NOTE = (
     "\n【关于时间标签】下面你俩的对话，每条开头的方括号是那条话的发送时间"
     "（月-日 时:分），只是让你知道「这是几点说的」，不是正文的一部分 —— "
@@ -95,14 +94,13 @@ LIFE_RULES = (
 )
 
 
-# 开头的时间标签。上下文里每条历史都带（见 Brain._stamp），模型会照抄这个格式，
-# 必须在出口剥掉。日期段允许 1~2 组：`_stamp()` 产出两组的 `[MM-DD HH:MM]`，
-# 只覆盖三组 `[YYYY-MM-DD HH:MM]` 时两组的会漏网。两个出口共用这个常量，免得改一处漏一处。
+# 出口要剥掉时间标签：上下文里每条历史都带，模型会照抄这个格式。
+# 日期段留 1~2 组 —— _stamp() 产出 [MM-DD HH:MM]，只写三组 [YYYY-MM-DD HH:MM] 的话
+# 两组的会漏。两个出口共用这一个正则。
 _TIME_TAG_RE = re.compile(r"^\[\d{1,4}(?:-\d{1,2}){1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*")
 
-# 剥"名字：正文"这种前缀。名字**从人设动态取**（name + nicknames），
-# 不写死 —— 换了人设角色名这里就跟着变，少一处会漏的地方。
-# 人设没填名字时退化为"不剥"，而不是留下一组无关的名字硬剥。
+# 剥"名字：正文"前缀，名字从人设取（name + nicknames）而不是写死。
+# 人设没填名字时退化成不剥。
 _NAME_PREFIX_CACHE = {"sig": None, "re": None}
 
 
@@ -139,16 +137,14 @@ def _clean(s, keep_newlines=False):
     """
     s = (s or "").strip()
 
-    # 先处理完整的 <think>...</think>，再收拾没闭合的残留
+    # 先处理完整的 <think>...</think>，再收拾被截断的残留
     s = re.sub(r"<think>.*?</think>", "", s, flags=re.S)
-    # 没闭合的（被截断）：<think> 之后的内容全丢，那不是正式回复
     if "<think>" in s:
-        s = s.split("<think>")[0]
+        s = s.split("<think>")[0]   # 截断的话 <think> 之后不是正式回复
     s = s.replace("</think>", "")
 
-    # 上下文里每条历史都带 `[09-29 06:18] `（见 Brain._stamp），便宜模型会
-    # 把它当正文模仿。HIST_TIME_NOTE 里明写了不要模仿，但它位置靠前、
-    # 注意力不够 —— 与其指望模型守规矩，不如在必经出口直接剥掉，只剥开头的。
+    # 便宜模型会把历史里的时间标签当正文抄。HIST_TIME_NOTE 里说了别模仿，
+    # 但它在 system 靠前位置，约束不住 —— 出口直接剥，只剥开头的。
     name_re = _name_prefix_re()
     if keep_newlines:
         out = []
@@ -189,8 +185,8 @@ def _is_silence(s):
 
 
 # --- 回复分段：把一条回复拆成"像真人连发的几条短消息" ---
-# 她已被要求自己用换行分条，这里尊重她的分条，只在单行仍超长时才硬拆。
-# 服务器（/api/chat 的 messages 字段）和存档（_log_turn）都用这一份，别处再写会漂。
+# 她自己会用换行分条，这里尊重她的分法，只在单行仍超长时硬拆。
+# /api/chat 的 messages 和存档 _log_turn 都用这一份。
 MAX_CHARS = 400          # 单条消息上限，超了就拆
 _SENT_END = "。！？!?…～~"
 _SOFT_END = "，、,；;：: "
@@ -313,16 +309,13 @@ class Brain:
     def _stamp():
         """给进上下文的历史消息打时间标签，形如 `[09-29 06:18] `。
 
-        不打标签她分不清"刚说的"和"六小时前说的"，会把凌晨提过的
-        "25 号的票"当成此刻正在谈的事。读法在 HIST_TIME_NOTE 里说明。
+        不打她分不清"刚说的"和"六小时前说的"。读法在 HIST_TIME_NOTE 里。
         """
         return datetime.datetime.now().strftime("[%m-%d %H:%M] ")
 
     # 只有他提到这些词，才把日记正文带进上下文。
-    #
-    # 以前每轮无条件带，三个坏处：白烧约 250 字；日记与 life_block 写的是
-    # 同一批事的两种说法，模型看到两份容易把日记内容当成"刚发生的事"讲出来；
-    # 今天的日记一写完（22:30 后）diary_block() 反而返回空，行为跟着时段跳。
+    # 早先每轮无条件带，白烧 250 字；而且日记和 life_block 写的是同一批事的
+    # 两种说法，模型看到两份会把日记当成"刚发生的事"讲出来。
     _DIARY_ASK = ("日记", "日志", "记了啥", "记的啥", "写了啥",
                   "写了什么", "写到哪", "今天记", "昨天记")
 
@@ -423,9 +416,8 @@ class Brain:
         life = self._life_block(query=user_text)
         if life:
             parts.append("\n" + life)
-        # 约定账本（agenda）：有日期、说好的事按日期强制带上，不靠语义碰运气 ——
-        # "票买了吗"这种短句压根不检索，"放假第一天要上班"排第 13 名召不回。
-        # 放在生活块之后是故意的：冲突时它离输出更近，更能压过日常设定。
+        # 约定账本（agenda）：有日期、说好的事按日期强制带上，不靠语义检索 ——
+        # "票买了吗"这种短句召不回来。放在生活块之后是故意的：冲突时它离输出更近。
         try:
             import agenda
             ab = agenda.block()
@@ -443,17 +435,16 @@ class Brain:
         msgs = [{"role": "system", "content": "".join(parts)}]
         for m in self.recent_hist():
             msgs.append(m)
-        # 说话规则贴**最后一条**（他的原话后面），约束力最强。不放进 system：
-        # 模型对 system 尾部的规则敏感度低，照做率明显差。hist 里存的是
-        # user_text 原值、不含这段，所以规则不会污染聊天历史。
-        # 分隔线别省：不加的话规则会紧贴他的原话，模型偶尔会把
-        # "只输出你会说的话本身"当成他说的话的一部分。
+        # 说话规则贴最后一条（紧跟他的原话），约束力最强 —— 放进 system 的话
+        # 模型对尾部规则的照做率明显差。hist 里存的是 user_text 原值，不含这段。
+        # 分隔线不能省：没有它规则会紧贴原话，模型偶尔把"只输出你会说的话本身"
+        # 当成他说的。
         tail = (user_text + "\n\n—— 下面是回话要求（不是他说的话）——\n"
                 + self.draft_rules)
         if life:
             tail += "\n" + LIFE_RULES
         msgs.append({"role": "user", "content": tail})
-        # 记下这一轮的"料"有多大：出问题时第一眼看的就是这个，配合 trace 落盘
+        # 这一轮的输入有多大，出问题时先看这个（配合 trace 落盘）
         self.last_sizes = {
             "persona": len(self.persona_text),
             "time": len(tm or ""),
@@ -471,9 +462,8 @@ class Brain:
         self.last_ms = None
         self.last_err = ""
         _t0 = time.time()
-        # 重试一次，但只重试"下一次可能就好了"的错：网络异常 / 超时 / 429 / 5xx。
-        # 401、402 这类重试没用还照样费钱 —— 欠费那次就是不重试才没把额度再烧一遍。
-        # 代价是最坏情况延迟翻倍（60s → 120s），所以 server 侧拿锁有超时兜着。
+        # 重试一次，只重试"下一次可能就好了"的错：网络异常 / 超时 / 429 / 5xx。
+        # 401、402 重试没用还照样费钱。代价是最坏情况延迟翻倍，server 侧有超时兜着。
         _last_exc = None
         for _attempt in range(2):
             _retry = False
@@ -485,7 +475,7 @@ class Brain:
                           "messages": msgs,
                           # 90 个 token 只够 60~90 个汉字，她想多说两句就被硬截断
                           "temperature": 0.85, "max_tokens": 200,
-                          # GLM 系默认先思考几百字，聊天气泡等不起 —— 关到最低档
+                          # GLM 系默认先思考几百字，聊天气泡等不起
                           "reasoning_effort": "low"},
                     timeout=60,
                 )
@@ -497,8 +487,7 @@ class Brain:
                     r.raise_for_status()
                     _j = r.json()
                     self.last_ms = int((time.time() - _t0) * 1000)
-                    # token 用量：上游在 usage 里回，拿不到就算了 ——
-                    # 没有它就只能看余额，出问题要很晚才发现
+                    # token 用量上游在 usage 里回，拿不到就算了
                     try:
                         _u = _j.get("usage") or {}
                         self.last_usage = {
@@ -571,9 +560,8 @@ class Brain:
         from memory_store_v2 import MemoryStore
 
         memory_block = ""
-        # 短句闲聊（"嗯""在吗""哈哈""??"）不检索记忆：这种话本身没信息量，
-        # 检索出来的"最相关"记忆往往是硬凑的，塞进上下文反而把她的话题和情绪带跑。
-        # 阈值同时从 0.25 提到 0.40（见 memory_store_v2.MemoryStore.render）。
+        # 短句闲聊（"嗯""在吗""哈哈"）不检索：这种话本身没信息量，硬凑出来的
+        # "最相关"记忆反而把她的话题带跑。阈值 0.25 → 0.40。
         q = (user_text or "").strip()
         if self.mem is not None and len(q) >= 6:
             try:
@@ -591,18 +579,16 @@ class Brain:
                   f"({'有稿' if draft else '没稿'})", flush=True)
         self.last_draft = draft
 
-        # 这里曾有一层「本地 4B 兜底」，已移除：本地模型要 bitsandbytes 4bit
-        # 量化，本机是 AMD 卡拿不到 CUDA 预编译包，那层从没真正跑起来过。
-        # API 拿不到稿就明说，不再假装还有后路。
+        # 这里曾有一层「本地 4B 兜底」，已移除：bitsandbytes 的 4bit 量化要 CUDA，
+        # 本机是 AMD 卡，那层从没真跑起来过。拿不到稿就明说。
         if draft:
             ans = draft
             self.last_mode = "API直出"
         else:
             ans = "……我脑子有点转不动，等会儿再聊？"
             self.last_mode = "API失败"
-        # API 失败时的那句兜底话，绝不能当成"她说过的话"存下来 ——
-        # 账户欠费期间主动搭话每 40 分钟失败一次，攒了 97 条一模一样的记录，
-        # 重启灌回上下文后她的聊天历史里全是同一句，人设就假了。
+        # 失败时的兜底话不能当"她说过的话"存。欠费那阵主动搭话每 40 分钟失败
+        # 一次，攒了 97 条一模一样的记录，重启灌回上下文后历史里全是同一句。
         _failed = (self.last_mode == "API失败")
 
         # 记忆抽取挪到后台：提取 API 一旦慢（25s 超时）也不能拖住回复
@@ -621,9 +607,8 @@ class Brain:
                     print(f"[perf] 后台记忆抽取失败：{str(e)[:80]}", flush=True)
             threading.Thread(target=_extract_bg, daemon=True).start()
 
-        # 主动搭话（proactive=True）的输入是「说/无」决策提示词，绝不能进对话
-        # 历史 —— 否则正常聊天会模仿这个格式，回出「说 xxx」开头。
-        # 历史里只留她的正文（剥掉「说」标记）；她答「无」就什么都不记。
+        # 主动搭话的输入是「说/无」决策提示词，不能进历史 —— 否则正常聊天会
+        # 模仿这个格式、回出「说 xxx」开头。历史里只留她的正文，答「无」就都不记。
         if proactive:
             _ls = (ans or "").splitlines()
             for _i, _l in enumerate(_ls):
@@ -649,13 +634,11 @@ class Brain:
         if len(self.hist) > self.history_turns + 1:
             self.hist = [self.hist[0]] + self.hist[-self.history_turns:]
         self.last_active = datetime.datetime.now()   # 记时间，供"离开时长"用
-        # 存一份当天的对话流水 —— 她晚上写日记要用（不然无从下笔，只能瞎编）
-        # 失败的兜底话不记：她没真的说过这句，写进日记就是编的
+        # 当天的对话流水，晚上写日记要用（不然无从下笔）
         if self.life is not None and not _failed:
             self.life.log_chat("user", user_text)
             self.life.log_chat("assistant", ans)
-        # 再存一份聊天记录存档 —— 重启桌宠后聊天窗能接着看，上下文也接得上
-        # 朋友圈决策这类内部调用不进聊天存档（不然她的对话里会出现提示词）
+        # 聊天记录存档，重启后聊天窗能接着看。朋友圈决策这类内部调用不进
         if log and not _failed:
             self._log_turn(user_text, ans, img=img)
         return ans, self.last_mode

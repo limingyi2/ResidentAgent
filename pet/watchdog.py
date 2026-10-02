@@ -31,9 +31,9 @@ if BRAIN not in sys.path:
     sys.path.insert(0, BRAIN)
 
 PET_BAT = os.path.join(HERE, "pet.py")          # 桌宠：本目录
-# 注意：这里**没有**云端大脑的守护 —— 大脑在另一台机器（C:\linzhixia\app），
-# 本机看门狗够不着它，云上的存活靠计划任务/服务自己管。
-# 以前留过一个 BRAIN_PY 常量，从来没被用过，README 也因此写成"桌宠/大脑掉了
+# 注意：这里没有云端大脑的守护。大脑在另一台机器（C:\linzhixia\app），
+# 本机看门狗够不着它。
+# 早先留过一个 BRAIN_PY 常量从来没被用过，README 也因此写成"桌宠/大脑掉了
 # 都自动拉起"，是句假话，已删。
 
 try:

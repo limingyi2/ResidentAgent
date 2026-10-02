@@ -467,9 +467,8 @@ function nowStr() {
     + ' ' + p(n.getHours()) + ':' + p(n.getMinutes());
 }
 // 转义成"能放进正文、也能放进双引号属性"的形式。
-// 以前是 textContent→innerHTML：只转 < > &，**不转引号** —— 而它被用在
-// data-mid="…"、src="…" 这类属性里，值里带一个引号就能突破属性。
-// （正文那条路走 textContent，本来就不会被注入，这里补的是属性那一路。）
+// 早先只转 < > & 不转引号，而它被用在 data-mid="…"、src="…" 这类属性里，
+// 值里带一个引号就能突破属性
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -515,10 +514,9 @@ function errLocalList() {
 }
 window.addEventListener('error', e => errLocal('页面', e.error || e.message));
 window.addEventListener('unhandledrejection', e => errLocal('异步', e.reason));
-// 包一层 fetch：所有网络失败自动记一笔（省得在每个调用点手写 try），
-// 顺便统一带上鉴权头，并把 URL 里那份 token 摘掉 ——
-// token 拼在 URL 上会进各级访问日志和 Referer；只有 <img>/<audio> 这种
-// 设不了头的媒体请求才继续用 ?token=（服务端两种都认）。
+// 包一层 fetch：网络失败自动记一笔（省得每个调用点手写 try），统一带上
+// 鉴权头，并把 URL 里那份 token 摘掉 —— 拼在 URL 上会进访问日志和 Referer。
+// <img>/<audio> 设不了头，那种仍走 ?token=（服务端两种都认）
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function (u, o) {
   o = o || {};
@@ -729,8 +727,10 @@ function addMsg(role, text, t, myImgB64, imgIsB64) {
   if (_ro) { try { _ro.observe(row); } catch (e) {} }
   scrollBottom();
 }
-// 聊天窗吸底：贴底直到他自己上翻（autoPin=false）。三个坑：只靠图片 onload 补贴底不够（加载失败、列表因别的原因变高都不触发）→ 改盯 ResizeObserver；
-// 程序滚动（清空重绘使 scrollTop 归零）会抛 scroll 事件被误判成上翻、把 autoPin 永久关掉 → 自己滚完 700ms 内忽略；图片无尺寸占位、加载前后高度剧变 → 加载期间连续补贴。
+// 聊天窗吸底：贴底直到他自己上翻（autoPin=false）。三个坑：
+// 只靠图片 onload 补不够（加载失败、列表因别的原因变高都不触发）→ 改盯 ResizeObserver；
+// 程序滚动会让 scrollTop 归零并抛 scroll 事件，被误判成上翻就把 autoPin 永久关掉
+//   → 自己滚完 700ms 内忽略；图片加载前后高度剧变 → 加载期间连续补贴。
 let autoPin = true;
 let pinUntil = 0;
 let _newNodes = [];                 // addMsg 这次创建出来的 DOM（增量渲染要用）
@@ -759,17 +759,16 @@ $('list').addEventListener('scroll', () => {
   const b = $('list');
   autoPin = b.scrollHeight - b.scrollTop - b.clientHeight < 120;
 });
-// 不能直接 observe(#list)：它是滚动容器、自身尺寸不变（变的是内容高度）不会触发，要观察每一条消息行。
+// 不能直接 observe(#list)：它是滚动容器，自身尺寸不变（变的是内容高度）不触发，
+// 要观察每一条消息行
 let _ro = null;
 try {
   if (window.ResizeObserver) {
     _ro = new ResizeObserver(() => { if (autoPin) pinNow(); });
   }
 } catch (e) {}
-// 复制到剪贴板（okMsg 可自定义提示）。
-// WebView 里 navigator.clipboard 常不可用（http 不是安全上下文），必须带 execCommand 兜底。
-// 以前同一个作用域里定义了**两次** copyText、另有一个 copyTextCompat，最后那个把前面
-// 全盖掉，于是"已复制"的提示成了死代码。现在只剩这一个。
+// 复制到剪贴板。WebView 里 navigator.clipboard 常不可用（http 不是安全上下文），
+// 必须带 execCommand 兜底
 function copyText(s, okMsg) {
   s = String(s == null ? '' : s);
   if (!s) return;
@@ -807,13 +806,11 @@ function markSaved(name, on) {
   localStorage.setItem('zx_saved', JSON.stringify(a));
 }
 function addLongPress(el, fn) {
-  // 长按**只会弹一次**。
-  // 以前 touchstart 定时器(550ms) 和 contextmenu 各调一次 fn，而 Android WebView
-  // 长按图片两个事件都会来 → fn 跑两遍 → body 上叠了两层全屏遮罩，
-  // 上面那层关掉、底下那层原地不动，于是"弹层关不掉、点哪都没反应"
-  // （返回主菜单也没用，遮罩挂在 body 上，照样盖住整个 App）。
+  // 长按只弹一次。Android WebView 长按图片时 touchstart 定时器和 contextmenu
+  // 都会来，都调 fn 就会在 body 上叠两层全屏遮罩：上面那层关掉、底下那层原地
+  // 不动，于是"弹层关不掉、点哪都没反应"（返回主菜单也没用，遮罩挂在 body 上）
   // 所以用 fired 记住本次手势已经触发过；长按后浏览器还会补一个 click，
-  // 顺手一起吞掉，否则会连着触发 onclick。
+  // 一起吞掉，否则会连着触发 onclick
   let tmr = null, fired = false;
   el.addEventListener('touchstart', () => {
     fired = false;
@@ -948,8 +945,8 @@ async function loadHistory(manual) {
       const b = $('list');
       const nearBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
       histSig = sig;
-      // 乐观气泡（本地先画的）到这里退役：服务端历史才是唯一真源。
-      // 不摘的话历史一到再画一遍，整轮消息双份（03:27 截图那个 bug 的根因）
+      // 乐观气泡（本地先画的）到这里退役，服务端历史才是唯一真源。
+      // 不摘的话历史一到再画一遍，整轮消息双份
       optEls.forEach(el => { try { el.remove(); } catch (e) {} });
       optEls = [];
       updateHistory(items);                 // 优先增量；算不出来才整列表重绘

@@ -35,10 +35,9 @@ PRUNE_DAYS = 60          # 超过这么多天的旧条目清掉（文件别无�
 BLOCK_CAP = 600          # 注入块字数上限
 CACHE_TTL = 60           # block() 内存缓存秒数
 
-# 状态机：pending 还没到 / due 就是今天 / missed 日期已过且没有办成的证据 /
-# done 确实办成了。
-# missed 注入时会明说"那天过去了、没记到办成"，并且**绝不允许把它挪到新日期
-# 当成未来的事**（以前只靠提示词约束，现在落成状态）。done 不再注入，但留在文件里备查
+# 状态机：pending 还没到 / due 就是今天 / missed 日期已过且没记到办成 / done 确实办成了。
+# missed 注入时会明说那天过去了，且不许把它挪到新日期当成未来的事
+# （以前只靠提示词约束，现在落成状态）。done 不再注入，留在文件里备查。
 STATUS_DONE = "done"
 STATUS_MISSED = "missed"
 
@@ -314,8 +313,8 @@ def refresh(mem_path=None, verbose=False):
         return {"added": 0, "pruned": 0, "total": len(_load())}
 
     known = _load()
-    # 源记忆被删掉（比如手工清理记忆库）时，账本里的影子也要跟着走 ——
-    # 否则会出现"她记得一件记忆库里根本没有的事"
+    # 源记忆被删掉时账本里的影子也要跟着走，否则会出现
+    # "她记得一件记忆库里根本没有的事"
     alive = {(it.get("id") or "") for it in items}
     kept = [k for k in known if not k.get("src") or k.get("src") in alive]
     pruned = len(known) - len(kept)
@@ -360,8 +359,8 @@ def refresh(mem_path=None, verbose=False):
     if added or pruned:
         _save(keep)
         _CACHE["t"] = 0.0
-    # 状态机结算：settle 给过期未办成的盖 missed，auto_done 给有办成证据的盖 done。
-    # 两步都只读盘，放在 refresh 里跟着摘要循环（20 分钟）跑
+    # settle 给过期未办成的盖 missed，auto_done 给有办成证据的盖 done。
+    # 两步都只读盘，跟着摘要循环（20 分钟）跑
     settled = settle(today)
     done_hits = auto_done_from_memory(mem_path)
     if verbose and (added or pruned):
@@ -446,10 +445,8 @@ def block(cap=BLOCK_CAP, today=None, use_cache=True):
         _CACHE["t"], _CACHE["text"] = now, ""
         return ""
 
-    # 「今天是 X月X日」必须写进块里：只放 system 最前面那句、隔了 4000 多字，
-    # 模型注意力早散了；日期紧贴条目，才建立得起"9月25日 = 4 天前"的关系。
-    # 两条硬约束：① 过去的事不许顺延成新的日子（没办成就是没办成）；
-    # ② 说未来必须带具体日期，不许只用"明天/后天"—— 相对词过一夜就指错日子
+    # 「今天是 X月X日」必须写进块里。只放 system 最前面那句的话隔了 4000 多字，
+    # 模型注意力早散了，日期紧贴条目才建立得起"9月25日 = 4 天前"的关系
     wk = "一二三四五六日"[today.weekday()]
     text = ("【日程】今天是 %d月%d日（周%s）。他提过的事都在下面，别装不知道。"
             "分两段看：“还没到的”是往后要办的；“已经过完的日子”是指那天"

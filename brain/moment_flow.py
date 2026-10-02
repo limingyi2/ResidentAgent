@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """朋友圈生成流水线：让她"想想要不要发"，要发就把模型回答解析成一条朋友圈。
 
-注意与 moments.py 的分工：moments.py 是朋友圈的存取（增删查、评论），这里只管
-"生成一条新朋友圈"的决策与解析。生成必须走 Brain.moment() 专用通道，绝不能走
-chat()（会被包成「他现在对你说：…」+塞聊天记录，模型有时只回一个字）。
+注意与 moments.py 的分工：moments.py 是存取（增删查、评论），这里只管"生成一条
+新朋友圈"的决策与解析。生成必须走 Brain.moment()，不能走 chat() —— 后者会被
+包成「他现在对你说：…」并塞进聊天记录，模型有时只回一个字
 """
 import os
 import random
@@ -102,8 +102,8 @@ def _add_moment_from_answer(ans):
 def try_post_moment(b):
     """让她"想想要不要发朋友圈"，要发就发掉。返回 (她这次的原话, 是否真发了)。
 
-    抽出来给两处共用：后台 _moment_loop 和 /api/moment_now。原话一定要返回 ——
-    她回"无"和格式跑偏，从结果上看都是"没发"，不打原话根本分不清。
+    抽出来给两处共用：后台 _moment_loop 和 /api/moment_now。原话一定要返回——
+    她回"无"和格式跑偏，从结果上看都是"没发"，不打原话分不清。
     """
     import moments
     life = getattr(b, "life", None)

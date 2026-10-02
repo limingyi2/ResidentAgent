@@ -61,8 +61,8 @@ _VOICE_CACHE = {}
 # server 的 GET /api/voices 直接读它，App 设置页渲染成列表，点一下走
 # POST /api/voice/apply 热切换（以前换音色得 ssh 上云改 config 再重启）。
 #
-# 平台音色标识硬编码在这里、而不是每次去问平台：那要联网，而设置页必须**永远能打开**
-# —— 平台抖动时列表变空，她连自己现在是什么声音都显示不出来，比列表旧一点糟得多。
+# 平台音色标识硬编码在这里而不是每次去问平台：那要联网，而设置页必须永远能打开
+# —— 平台抖动时列表变空，她连自己现在是什么声音都显示不出来。
 # 复刻出的 voice_id / uri 一旦生成就固定不变，硬编码不会失效（账号 id 不是密钥）。
 # 以后上传了新音色往表里加一条即可：key 用英文，别改已有条目的 key。
 #
@@ -218,8 +218,8 @@ def verify_catalog(cfg=None, timeout=30):
             plat["aliyun"] = None
 
     # --- 硅基（旧平台） ---
-    # 硅基的凭据在**顶层** api_base/api_key（那是聊天模型在用的同一份），不在 voice 段里
-    # —— 跟阿里正好相反，别照着阿里的写法抄。
+    # 硅基的凭据在顶层 api_base/api_key（跟聊天模型共用同一份），不在 voice 段里，
+    # 跟阿里正好相反，别照着阿里的写法抄
     sf_key = c.get("api_key") or (c.get("siliconflow") or {}).get("api_key") or ""
     sf_base = (c.get("api_base") or (c.get("siliconflow") or {}).get("api_base") or "").rstrip("/")
     if sf_key and sf_base:

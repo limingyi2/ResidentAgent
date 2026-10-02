@@ -38,21 +38,19 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
-        // 界面是 file:// 本地页，要请求云机接口（跨域）。通用访问这个开关是**必须**的：
-        // 关掉之后 fetch 会被同源策略静默拦掉，表现成 "Failed to fetch"。
-        // 代价是 file:// 页获得了跨源能力 —— 残余风险靠"只往 WebView 里加载本地 asset、
-        // 从不加载远端 URL"兜着。想彻底去掉这个开关，得改用 WebViewAssetLoader 把页面
-        // 挂到 https://appassets.androidplatform.net 下（改了要真机回归，见更新日志）。
+        // 界面是 file:// 本地页，要请求云机接口（跨域）。这个开关必须开：
+        // 关掉后 fetch 被同源策略静默拦掉，表现成 "Failed to fetch"。
+        // 残余风险靠"只加载本地 asset、从不加载远端 URL"兜着。想彻底去掉得改用
+        // WebViewAssetLoader 把页面挂到 https://appassets.androidplatform.net 下。
         s.setAllowUniversalAccessFromFileURLs(true);
-        // 这一条是**不需要**的：它允许 file:// 页读取**其它本地文件**，而本页面从不读本地文件。
-        // 关掉只减攻击面 —— file:// + 通用访问 + JS 桥正是 WebView 被 RCE 的经典组合。
+        // 这条不需要：它允许 file:// 页读其它本地文件，而本页面从不读。关掉只减攻击面
         s.setAllowFileAccessFromFileURLs(false);
         s.setLoadWithOverviewMode(false);
         s.setUseWideViewPort(true);
         s.setSupportZoom(false);
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        // 页面是 file:// 源，混合内容策略对它本来不生效；这条留着是为了将来换成
-        // WebViewAssetLoader（https 源）时能想起来要一起改成 COMPATIBILITY_MODE。
+        // file:// 源下混合内容策略本来不生效。留着是为了将来换 WebViewAssetLoader
+        // （https 源）时记得改成 COMPATIBILITY_MODE
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         s.setUserAgentString(s.getUserAgentString() + " ZhixiaChat/1.0");
 
@@ -87,9 +85,8 @@ public class MainActivity extends Activity {
 
         web.loadUrl("file:///android_asset/chat.html");
         // 页面自己的 localStorage 会被"清除 WebView 数据 / 换包名重装"清空，
-        // 而原生这边存的 base/token 还在（它跟着 App 数据走，清 WebView 不清它）。
-        // 所以把原生存过的值回灌一次 —— 否则用户明明填过一次，页面却当没填过，
-        // 每个请求都发成相对路径，表现成"连接不到网络"。
+        // 原生这边存的 base/token 却还在（清 WebView 不清它）。回灌一次，
+        // 否则用户明明填过，页面却当没填过，每个请求都发成相对路径
         SharedPreferences sp = getSharedPreferences("zx", MODE_PRIVATE);
         final String savedBase = sp.getString("base", "");
         final String savedToken = sp.getString("token", "");

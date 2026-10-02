@@ -13,8 +13,8 @@ import sys
 import json
 import threading
 
-# 计划任务启动时 stdout 是 GBK：回复里带 emoji，print 就抛 UnicodeEncodeError，
-# 整个流程断在"发送"之前（表现为"生成了回复但对方收不到"）。强制 UTF-8 + replace
+# 计划任务启动时 stdout 是 GBK，回复里带 emoji 会让 print 抛
+# UnicodeEncodeError，流程断在"发送"之前（看着像生成了但对方收不到）
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -45,16 +45,15 @@ def load_config():
 
 api_config = load_config()
 
-# 访问码优先读 brain_token，旧配置的 mobile.token 继续认。这个兜底不能删：
-# 读不到会变成空串，_check() 直接放行，等于撤掉鉴权
+# 优先读 brain_token，旧的 mobile.token 继续认。兜底不能删：读不到会变成
+# 空串，_check() 直接放行，等于撤掉鉴权
 MOB_CFG = api_config.get("mobile") or {}
 if not isinstance(MOB_CFG, dict):
     MOB_CFG = {}
 BRAIN_TOKEN = str(api_config.get("brain_token") or MOB_CFG.get("token") or "")
 
-# 白名单式浅拷贝：这里漏掉哪个键，对应模块就读到空配置、改了也不生效
-# （vision 与 voice 各栽过一次，uapi 也一直漏着 —— 所有 UAPI 调用都没带上 token）。
-# 往 config 加新功能段时记得同步这里
+# 白名单式浅拷贝。这里漏掉哪个键，对应模块就读到空配置、改了也不生效
+# （vision 和 voice 各栽过一次）。往 config 加新功能段时记得同步这里
 API_CFG = {k: api_config[k] for k in
            ("api_base", "api_key", "model", "vision", "voice", "uapi")
            if k in api_config}
@@ -86,9 +85,9 @@ def _trace_path():
 
 TRACE_MAX = 4 * 1024 * 1024        # 超过这个大小就砍掉前面一半（按行砍）
 
-# 落盘和轮转必须串起来。trace 是**多线程**在写：请求线程（/api/chat）与 6 条
+# 落盘和轮转必须串起来。trace 是多线程在写：请求线程（/api/chat）与 6 条
 # 后台自治循环都会调 _trace_write。没有锁的话，轮转的"读全文→写回前半"会和
-# 另一条线程的 append 交错 —— 那条刚写进去的记录会随着后半段一起被丢掉。
+# 另一条线程的 append 交错，那条刚写进去的记录会随着后半段一起被丢掉
 _TRACE_LOCK = threading.Lock()
 
 
