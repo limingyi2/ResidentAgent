@@ -326,7 +326,8 @@ body.notab .page { bottom:0; }
       <div id="connResult" style="text-align:center;font-size:12.5px;color:#888;padding:10px 0"></div>
     </div>
     <div class="grp">
-      <button style="display:block;width:calc(100% - 28px);margin:0 auto 16px;height:44px;border:none;border-radius:8px;background:#8a8a8a;color:#fff;font-size:15px" onclick="checkUpdate(true)">检查更新</button>
+      <button style="display:block;width:calc(100% - 28px);margin:0 auto 12px;height:44px;border:none;border-radius:8px;background:#8a8a8a;color:#fff;font-size:15px" onclick="checkUpdate(true)">检查更新</button>
+      <div class="hint" id="verLine" style="text-align:center">版本加载中…</div>
     </div>
   </div>
 </div>
@@ -415,7 +416,7 @@ body.notab .page { bottom:0; }
     <div style="padding:20px 16px 8px">
       <div style="font-size:16.5px;font-weight:500">发现新版本</div>
       <div id="updName" style="font-size:12.5px;color:#888;margin-top:6px"></div>
-      <div style="font-size:12.5px;color:#666;margin-top:8px">包含最新功能与问题修复</div>
+      <div id="updNote" style="font-size:12.5px;color:#666;margin-top:8px;line-height:1.5;text-align:left"></div>
     </div>
     <div style="border-top:0.5px solid #eee;display:flex;margin-top:10px">
       <div style="flex:1;padding:13px;font-size:15px;color:#666" onclick="updLater()">稍后更新</div>
@@ -431,7 +432,7 @@ body.notab .page { bottom:0; }
 /* --- 基础 --- */
 const DEF_BASE  = '';   // 服务地址留空：首次打开请在「我 → 设置」里填（存本地，只需填一次）
 const DEF_TOKEN = '';   // 鉴权 token 留空：同上，与服务端保持一致
-const APP_CODE  = 22;   // 22 = 设置页多一栏「你们的关系」（朋友/伴侣，可热切换）；密钥框不再显示打码串，改用「已有一把」；21 = 修表情包模块：长按图片可加入我的表情包、长按/红点删表情、原生confirm假死改自绘弹层、表情面板只显图库（不再混入自拍聊天图）、图挂了给可见提示
+const APP_CODE  = 0;   // 构建时由 deploy/rebuild_apk.py 从仓库根 version.json 注入（别手改）
 let BASE  = localStorage.getItem('zx_base')  || DEF_BASE;
 let TOKEN = localStorage.getItem('zx_token') || DEF_TOKEN;
 const $ = id => document.getElementById(id);
@@ -1796,7 +1797,14 @@ async function toggleFeat(k, sw) {
   } catch (e) { sw.className = 'fsw' + (to ? '' : ' on'); tip('没改成，连不上她'); }
 }
 let updUrl = '';
-function showUpdDlg(name, url) { updUrl = url; $('updName').textContent = name; $('updDlg').style.display = 'flex'; }
+function showUpdDlg(name, url, note) {
+  updUrl = url;
+  $('updName').textContent = name;
+  // 更新说明来自云端 version.json 的 note，一两句说清改了什么
+  const n = $('updNote');
+  if (n) n.textContent = (note || '包含最新功能与问题修复');
+  $('updDlg').style.display = 'flex';
+}
 function updLater() { $('updDlg').style.display = 'none'; }
 function updNow() {
   $('updDlg').style.display = 'none';
@@ -1809,10 +1817,20 @@ async function checkUpdate(manual) {
   try {
     const r = await fetch(api('/api/app/version'));
     const d = await r.json();
+    const vl = $('verLine');
+    const mine = 'v' + (d.name || APP_CODE);
     if ((d.code || 0) > APP_CODE) {
-      showUpdDlg(d.name || ('v' + d.code), BASE + (d.url || '/api/app.apk') + '?token=' + encodeURIComponent(TOKEN));
-    } else if (manual) tip('已经是最新版本啦');
-  } catch (e) { if (manual) tip('检查失败，稍后再试'); }
+      if (vl) vl.textContent = '当前 ' + mine + '，有新版本 ' + (d.name || d.code);
+      showUpdDlg(d.name || ('v' + d.code), BASE + (d.url || '/api/app.apk') + '?token=' + encodeURIComponent(TOKEN), d.note);
+    } else {
+      if (vl) vl.textContent = '当前 ' + mine + '（' + APP_CODE + '）· 已是最新';
+      if (manual) tip('已经是最新版本啦');
+    }
+  } catch (e) {
+    const vl = $('verLine');
+    if (vl) vl.textContent = '版本号读取失败';
+    if (manual) tip('检查失败，稍后再试');
+  }
 }
 
 /* --- 启动 --- */

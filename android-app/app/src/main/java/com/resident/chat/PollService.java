@@ -105,8 +105,10 @@ public class PollService extends Service {
                 }
                 c.disconnect();
 
-                // 内置更新检查：服务器上有更新版就通知一次
-                int installedCode = 22;   // 跟着 APK 版本走，每次发版改这里（与 chat.html APP_CODE 一致）
+                // 内置更新检查：服务器上有更新版就通知一次。
+                // 版本号取 BuildConfig（由 build.gradle 从仓库根 version.json 读），
+                // 不再手写常量 —— 手写过四份，每份都不同步，装完照样提示更新。
+                int installedCode = BuildConfig.VERSION_CODE;
                 HttpURLConnection vc = open(base, "/api/app/version", token);
                 if (vc.getResponseCode() == 200) {
                     StringBuilder sb = new StringBuilder();

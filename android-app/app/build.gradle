@@ -2,22 +2,37 @@ plugins {
     id 'com.android.application'
 }
 
+// 版本号的唯一真源是仓库根的 version.json。四处以前各写各的：
+//   build.gradle 的 versionCode / chat.html 的 APP_CODE /
+//   PollService 的 installedCode / 云端 app/version.json
+// 结果是手机上装的是 22、云端说 23 —— 装完照样提示更新，能一直提示到天荒地老。
+// 现在都从 version.json 取，rebuild_apk.py 会先把它写进这三处。
+def verFile = file("$rootDir/../version.json")
+def ver = new groovy.json.JsonSlurper().parseText(verFile.text)
+
 android {
     namespace 'com.resident.chat'
     compileSdk 34
 
     defaultConfig {
         applicationId "com.resident.chat"
-        minSdk 24
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        minSdk ver.min_sdk as int
+        targetSdk ver.target_sdk as int
+        // 这两个只影响"应用信息"里显示的版本号，跟更新检查无关（那个走 APP_CODE）
+        versionCode ver.code as int
+        versionName ver.name
     }
 
     buildTypes {
         release {
             minifyEnabled false
         }
+    }
+
+    // PollService 的更新检查要读 versionCode（versionCode 写在 defaultConfig，
+    // 拿不到，得从 BuildConfig 取）。AGP 8 默认不生成 BuildConfig，得显式开。
+    buildFeatures {
+        buildConfig true
     }
 
     compileOptions {

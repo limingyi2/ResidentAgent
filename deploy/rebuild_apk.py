@@ -44,9 +44,35 @@ if not os.path.exists(gradle):
 # fetch 都把 "/api/xxx" 当成本地相对路径去 file:/// 下找，必然失败，用户只看到
 # "连接不到网络"。让人每次换包名都手动重填一次地址，既烦又容易填错。
 # 注入只在本地构建时发生，仓库里那份 chat.html 始终是空占位（不能泄露地址/口令）。
+#
+# APP_CODE 也在这里注入，值取仓库根 version.json —— 它是版本号的唯一真源。
+# 以前 APP_CODE 是手写的常量，跟 build.gradle 的 versionCode、云端
+# app/version.json 各写各的：手机上装的是 22、云端说 23，装完照样提示更新。
 CONN = os.path.join(os.path.dirname(ROOT), "brain", "config", "app_conn.json")
+VER = os.path.join(os.path.dirname(ROOT), "version.json")
 ASSET = os.path.join(ROOT, "app", "src", "main", "assets", "chat.html")
 backup = None
+
+# 版本号：chat.html 的 APP_CODE（更新检查用）必须跟 build.gradle 读的同一个值
+app_code = None
+if os.path.exists(VER):
+    import json
+    vcode = int(json.load(open(VER, encoding="utf-8")).get("code") or 0)
+    if vcode:
+        import re
+        src0 = open(ASSET, encoding="utf-8", newline="").read()
+        new0, n = re.subn(r"const APP_CODE\s*=\s*\d+;",
+                          "const APP_CODE  = %d;" % vcode, src0, count=1)
+        if n:
+            backup = src0
+            open(ASSET, "w", encoding="utf-8", newline="").write(new0)
+            app_code = vcode
+            print("已注入 APP_CODE =", vcode)
+        else:
+            print("!! 没找到 APP_CODE 占位串，版本号没注入（chat.html 结构变了？）")
+else:
+    print("没有 %s，跳过版本号注入" % VER)
+
 if os.path.exists(CONN):
     import json
     conn = json.load(open(CONN, encoding="utf-8"))
@@ -54,7 +80,8 @@ if os.path.exists(CONN):
     token = str(conn.get("token") or "").strip()
     if base and token:
         src = open(ASSET, encoding="utf-8", newline="").read()
-        backup = src
+        if backup is None:
+            backup = src
         out = src.replace("const DEF_BASE  = '';", "const DEF_BASE  = '%s';" % base, 1)
         out = out.replace("const DEF_TOKEN = '';", "const DEF_TOKEN = '%s';" % token, 1)
         if out == src:
