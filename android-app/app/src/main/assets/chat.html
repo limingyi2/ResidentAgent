@@ -298,6 +298,11 @@ body.notab .page { bottom:0; }
       <div class="hint">换性格不用重启，点一下就生效；长相永远是同一个人。</div>
     </div>
     <div class="grp">
+      <div class="setrow"><div class="lab">你们的关系</div><input id="relationCur" readonly placeholder="加载中…"></div>
+      <div id="relationList"></div>
+      <div class="hint">关系和性格是两回事，两边随便配。换关系不用重启，记忆都在。</div>
+    </div>
+    <div class="grp">
       <div class="setrow"><div class="lab">她的声音</div><input id="voiceCur" readonly placeholder="加载中…"></div>
       <div id="voiceList"></div>
       <div class="hint">点「试听」先听，觉得可以再点整行换掉。只影响她发的语音条，文字、性格、记忆都不动。</div>
@@ -1366,7 +1371,39 @@ async function loadPersonas() {
         '</div><div style="font-size:12px;color:#9c9c9c;margin-top:2px">' + esc(p.desc || '') + '</div></div>';
       box.appendChild(row);
     });
+    loadRelations(d);
   } catch (e) { cur.value = '加载失败'; }
+}
+
+let RELATION_LABELS = {};
+function loadRelations(d) {
+  const cur = $('relationCur'), box = $('relationList');
+  if (!cur || !box) return;
+  box.innerHTML = '';
+  RELATION_LABELS = { friend: '朋友 · 老同学', partner: '伴侣 · 在谈' };
+  (d.relations || []).forEach(x => { RELATION_LABELS[x.key] = x.label || x.key; });
+  const now = d.relation || 'friend';
+  cur.value = RELATION_LABELS[now] || now;
+  (d.relations || []).forEach(x => {
+    const row = document.createElement('div');
+    row.className = 'setrow';
+    row.style.borderTop = '1px solid #f0f0f0';
+    row.onclick = () => applyRelation(x.key, x.label || x.key);
+    row.innerHTML = '<div style="flex:1"><div style="font-size:15px;color:#191919">' + esc(x.label || x.key) +
+      (x.key === now ? ' <span style="color:#07c160;font-size:12px">· 当前</span>' : '') + '</div></div>';
+    box.appendChild(row);
+  });
+}
+
+async function applyRelation(key, label) {
+  if (!confirm('把关系换成「' + (label || key) + '」？她接下来会按这个关系说话，记忆都还在。')) return;
+  tip('切换中…');
+  try {
+    const r = await fetch(api('/api/relation/apply'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relation: key }) });
+    const d = await r.json();
+    if (d.ok) { tip('已切换：' + (RELATION_LABELS[d.relation] || d.relation)); loadPersonas(); }
+    else tip(d.err || '切换失败');
+  } catch (e) { tip('切换失败，检查网络'); }
 }
 async function applyPersona(key, label) {
   if (!confirm('换成「' + (label || key) + '」？她接下来的说话方式会变，但你们聊过的还都记得。')) return;

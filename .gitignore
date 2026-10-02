@@ -124,3 +124,9 @@ _smoke*
 # 任何含 workflow 文件的 push。补正办法：
 #   gh auth refresh -h github.com -s workflow
 # 如果又出现 remote rejected（缺 workflow scope），先查 scopes 再推。
+# 人设同步脚本：里面有真实的云机 IP 与 SSH 用户名，对 clone 的人没用
+# （他们没有这台服务器），也不该出现在公开仓库里。脚本副本在私有仓库
+# limingyi2/zhixia-private，换服务器时从那儿取。
+tools/persync.py
+# persync 传输用的临时 payload（每次 push 覆写）
+deploy/_persync_payload.b64

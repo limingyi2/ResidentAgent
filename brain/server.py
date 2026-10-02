@@ -645,6 +645,31 @@ def start_remote_api(brain):
                         self._json(200, {"ok": True, "name": her})
                     except Exception as e:
                         self._json(200, {"ok": False, "err": str(e)[:80]})
+                elif path == "/api/relation/apply":
+                    # 切关系档（friend/partner）。与人设切换同理：落盘 + 改内存
+                    # 两处都要，只改一处会出现"界面变了、她没变"
+                    try:
+                        import persona_store
+                        rel = str(body.get("relation") or "").strip().lower()
+                        if rel not in persona_store.RELATIONS:
+                            self._json(200, {"ok": False, "err": "没有这个关系档"})
+                            return
+                        cfg = {}
+                        try:
+                            cfg = json.load(open(config_path(), encoding="utf-8"))
+                        except Exception:
+                            cfg = {}
+                        cfg["relation"] = rel
+                        with open(config_path(), "w", encoding="utf-8") as f:
+                            json.dump(cfg, f, ensure_ascii=False, indent=2)
+                        api_config["relation"] = rel
+                        with _chat_lock():
+                            brain.reload_persona()
+                        print("[大脑] 关系已切为 %s" % rel, flush=True)
+                        self._json(200, {"ok": True, "relation": rel})
+                    except Exception as e:
+                        errlog.log_exc("api/relation/apply", e)
+                        self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/voice/apply":
                     # 同人设切换，但内存里要同步两处：api_config 和 API_CFG
                     # （voice.synth() 实际收到的浅拷贝）。只改一处会"看着换了、声音没变"
@@ -857,7 +882,12 @@ def start_remote_api(brain):
                         })
                 except Exception:
                     pass
-                self._json(200, {"name": name, "key": cur, "presets": presets})
+                self._json(200, {"name": name, "key": cur, "presets": presets,
+                                 "relation": persona_store.relation_of(api_config),
+                                 "relations": [{"key": k,
+                                                "label": "伴侣 · 在谈" if k == "partner"
+                                                else "朋友 · 老同学"}
+                                               for k in persona_store.RELATIONS]})
             elif path == "/api/voices":
                 # 清单是 VOICE_CATALOG 里的死数据，不联网 —— 设置页必须永远打得开
                 try:
