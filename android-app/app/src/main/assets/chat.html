@@ -340,8 +340,8 @@ body.notab .page { bottom:0; }
     </div>
     <div class="grp">
       <div class="setrow"><div class="lab">接口地址</div><input id="mBase" placeholder="https://…/v1"></div>
-      <div class="setrow"><div class="lab">密钥</div><input id="mKey" placeholder="sk-…"></div>
-      <div class="hint">密钥只存在她那边（云上的配置里），不会发到别处。</div>
+      <div class="setrow"><div class="lab">密钥</div><input id="mKey" placeholder="留空 = 不改，继续用现在这个"></div>
+      <div class="hint">存在云上的配置里，她调模型接口时用。改新的就填完整 key，想保持原样就留空。</div>
     </div>
     <div class="grp">
       <div class="setrow"><div class="lab">对话模型</div><select id="mChat"></select></div>
@@ -1500,8 +1500,10 @@ async function loadModelCfg(force) {
     const d = await r.json();
     mCur = d.current || {}; mGroups = d.groups || {}; mProvs = d.providers || [];
     mProv = mCur.provider || 'siliconflow';
-    $('mBase').value = mCur.api_base || '';
-    $('mKey').value = mCur.api_key || '';
+$('mBase').value = mCur.api_base || '';
+    // 不预填真key：服务端只回脱敏的（前后各几位），够认出是哪一把、不够用
+    $('mKey').value = '';
+    $('mKey').placeholder = mCur.api_key ? ('当前：' + mCur.api_key + '　留空 = 不改') : 'sk-…';
     markProvider(mProv);
     // 视觉模型也能聊天，所以对话那栏把 VL 系列一起列出来
     fillSel('mChat', (mGroups.chat || []).concat(mGroups.vision || []),
@@ -1565,8 +1567,9 @@ async function saveModels() {
     audio: $('mAudio').value || '',
     vision_enabled: !!$('mVision').value,
   };
-  if (!payload.api_base || !payload.api_key) {
-    out.textContent = '地址和密钥都得填，不然她没法说话'; return;
+  // 密钥留空 = 不改那把（服务端 apply_cfg 里 `if key and ...` 就是这么判的）
+  if (!payload.api_base) {
+    out.textContent = '地址得填，不然她没法说话'; return;
   }
   if (!payload.chat) { out.textContent = '至少选一个对话模型'; return; }
   out.textContent = '保存中…';

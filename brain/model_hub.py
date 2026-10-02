@@ -186,7 +186,12 @@ def list_models(base, key, force=False, provider="siliconflow"):
 
 # --- 当前配置 ---
 def current(cfg):
-    """从配置读出"现在用哪家、哪个模型"。key 只留前后各几位（防截图外泄）。"""
+    """从配置读出"现在用哪家、哪个模型"。
+
+    ⚠️ 返回的 `api_key` 是**完整明文**，因为服务端自己要用它去调服务商
+    （`/api/models` 里 `list_models(cur["api_base"], cur["api_key"])`）。
+    **不要把它直接放进 HTTP 响应** —— 回给客户端的用 `public_current()`。
+    """
     cfg = cfg or {}
     vis = cfg.get("vision") if isinstance(cfg.get("vision"), dict) else {}
     provider = str(cfg.get("provider") or "")
@@ -206,6 +211,21 @@ def current(cfg):
         "audio": str(cfg.get("audio_model") or ""),
         "audio_ready": False,          # 语音模块还没做，App 据此置灰
     }
+
+
+def public_current(cfg):
+    """给客户端看的版本：api_key 只留前后各几位，其余用省略号盖掉。
+
+    为什么要脱敏：这个响应走明文 HTTP，而且 App 收到后会把它**填进一个
+    普通 input**（chat.html 的 loadModelCfg）。密钥是账号级凭据，明文过公网
+    等于任何人抓到一次包或看到一次屏幕就能拿去刷额度。
+    前端提交时 api_key 留空 = 沿用当前（apply_cfg 里 `if key and ...`），
+    所以不预填不影响正常改设置。
+    """
+    d = current(cfg)
+    k = d.get("api_key") or ""
+    d["api_key"] = ("%s…%s" % (k[:6], k[-4:])) if len(k) > 12 else ("*" * len(k))
+    return d
 
 
 def apply_cfg(cfg, p):

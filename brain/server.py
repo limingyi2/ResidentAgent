@@ -731,7 +731,7 @@ def start_remote_api(brain):
                             print("[模型] " + "；".join(changed), flush=True)
                             self._json(200, {
                                 "ok": True, "changed": changed,
-                                "current": model_hub.current(api_config)})
+                                "current": model_hub.public_current(api_config)})
                     except Exception as e:
                         errlog.log_exc("api/models/apply", e)
                         self._json(200, {"ok": False, "err": str(e)[:120]})
@@ -885,8 +885,9 @@ def start_remote_api(brain):
                     cur = model_hub.current(api_config)
                     lst = model_hub.list_models(cur["api_base"],
                                                 cur["api_key"], force=force)
+                    # 回客户端用脱敏版：cur 里的真 key 只留在这一次调用里
                     self._json(200, {
-                        "ok": True, "current": cur,
+                        "ok": True, "current": model_hub.public_current(api_config),
                         "providers": [{"key": k, "name": v["name"],
                                        "base": v["base"]}
                                       for k, v in model_hub.PROVIDERS.items()],
@@ -897,7 +898,7 @@ def start_remote_api(brain):
                     errlog.log_exc("api/models", e)
                     self._json(200, {
                         "ok": False, "err": str(e)[:120],
-                        "current": model_hub.current(api_config),
+                        "current": model_hub.public_current(api_config),
                         "providers": [{"key": k, "name": v["name"],
                                        "base": v["base"]}
                                       for k, v in model_hub.PROVIDERS.items()],
