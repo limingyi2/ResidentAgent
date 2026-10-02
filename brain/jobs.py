@@ -12,7 +12,7 @@
 import time
 import threading
 
-from runtime import _LOCAL, API_CFG
+from runtime import _LOCAL, API_CFG, _trace_write
 from reply import strip_say_marker, resolve_gen_tags, resolve_voice_tag
 from proactive import (
     PROACTIVE_RULES, _proactive_conf, _in_quiet,
@@ -30,6 +30,22 @@ def start_background(brain):
     threading.Thread(target=_seed_initial_moment, args=(brain,), daemon=True).start()
     threading.Thread(target=_proactive_loop, args=(brain,), daemon=True).start()
     threading.Thread(target=_reminder_loop, args=(brain,), daemon=True).start()
+
+
+def _trace_loop(kind, **kw):
+    """自治循环也落一行 trace。
+
+    以前 trace 只有 /api/chat 一条路有，"她为什么主动说了这句""这轮为什么没发"
+    只能靠翻 stdout（重启就没了）。去重与静默闸门拦掉的每一轮同样记下来 ——
+    拦了多少次是判断"频率合不合适"的唯一依据。
+    """
+    try:
+        time_str = time.strftime("%Y-%m-%d %H:%M")
+        rec = {"t": time_str, "kind": kind}
+        rec.update(kw)
+        _trace_write(rec)
+    except Exception:
+        pass
 
 
 def catch_up_life_local(brain):
@@ -118,10 +134,12 @@ def _moment_loop(b):
                 continue        # 一天最多四条（自拍/吃的/风景/猫狗/八卦都能发，活跃一天很正常）
             raw, posted = try_post_moment(b)
             if posted:
+                _trace_loop("moment", posted=1, chars=len(raw or ""))
                 print("[大脑] 她发了一条朋友圈", flush=True)
             else:
                 # 必须把原话打出来：她可能只是"这轮不想发"，也可能是格式跑偏，
                 # 只看"没发"分不清这两种情况
+                _trace_loop("moment", posted=0, raw=(raw or "")[:80])
                 print("[大脑] 朋友圈：这轮没发，她的原话＝%s"
                       % raw.replace("\n", " / ")[:140], flush=True)
         except Exception as e:
@@ -173,9 +191,11 @@ def _proactive_loop(b):
             # 旧写法 lines[1:] 会把「说 我找找，你等着」的正文一起丢掉
             text = strip_say_marker(ans)
             if not text or text == "无":
+                _trace_loop("proactive", sent=0, reason="她自己不想说")
                 continue
             text = resolve_gen_tags(text)
             if not text:
+                _trace_loop("proactive", sent=0, reason="标签解析后为空")
                 continue
             text = resolve_voice_tag(text, API_CFG)
             # 去重闸门：她最近已经说过（或截一段说过）就不发第二遍，
@@ -184,10 +204,13 @@ def _proactive_loop(b):
             if _is_repeat_of_recent(text):
                 print("[大脑] 主动搭话：和最近说过的话重复，这轮不发",
                       flush=True)
+                _trace_loop("proactive", sent=0, reason="和最近说过的话重复")
                 continue
             _cloud_append_assistant(text)
             _proactive_count_up()
             _proactive_note_sent()      # 记下这次主动，等他反应（自适应频率用）
+            _trace_loop("proactive", sent=1, chars=len(text),
+                        n_today=used + 1, interval_sec=interval)
             print("[大脑] 她主动找他说话了（今天第 %d 次）"
                   % (used + 1), flush=True)
         except Exception as e:
@@ -204,8 +227,10 @@ def _reminder_loop(b):
             ans, _m = b.chat(prompt, proactive=True, log=False)
         text = strip_say_marker((ans or "").strip())
         if not text or text == "无":
+            _trace_loop("reminder", sent=0, reason="她自己不想说")
             return
         _cloud_append_assistant(text)
+        _trace_loop("reminder", sent=1, chars=len(text))
         print("[大脑] 事件提醒：%s" % text[:50], flush=True)
 
     time.sleep(90)           # 启动先让缓存和大脑站稳

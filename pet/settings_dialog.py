@@ -46,7 +46,7 @@ class SettingsDialog(QDialog):
         self.persona_key = key_from_config(api_config)
         self.cur = load_persona(self.persona_key)
 
-        self.setWindowTitle("角色 · 设置")
+        self.setWindowTitle("人设 · 设置")
         self.setMinimumSize(440, 520)
         self.setStyleSheet("QDialog{background:#fff5f8;}")
 
@@ -97,7 +97,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         self.ed_name = QLineEdit()
         self.ed_nick = QLineEdit()
-        self.ed_nick.setPlaceholderText("多个小名用 / 分隔，如：角色/角色")
+        self.ed_nick.setPlaceholderText("多个小名用 / 分隔，多个小名用 / 分隔")
         self.ed_call = QLineEdit()
         self.ed_background = QTextEdit(); self.ed_background.setFixedHeight(70)
         self.ed_scene = QTextEdit(); self.ed_scene.setFixedHeight(52)

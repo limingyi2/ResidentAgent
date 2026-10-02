@@ -84,12 +84,36 @@ def _trace_path():
         return r"C:\linzhixia\data\trace.jsonl"
 
 
+TRACE_MAX = 4 * 1024 * 1024        # 超过这个大小就砍掉前面一半（按行砍）
+
+
+def _trace_trim(path):
+    """trace 是 append-only 的，不设上限就一直长。
+
+    和 errlog 同一个做法（按行砍一半，不会砍出半行 JSON）：观测文件不能变成
+    磁盘和读取时间的负担 —— /api/stats 每天都要把它读一遍。
+    """
+    try:
+        if os.path.getsize(path) <= TRACE_MAX:
+            return
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(lines[len(lines) // 2:])
+    except Exception:
+        pass
+
+
 def _trace_write(rec):
-    """每轮对话落一行 trace。
+    """落一行 trace（HTTP 对话每轮一行，自治循环各一条）。
 
     记的是"这轮是怎么产生出来的"：命中了哪几条记忆（含相似度）、注入了哪些块各多少
     字、约定账本有没有带上、去重与静默闸门拦没拦、用了哪个模型、延迟、token、
     是不是走了兜底。**只记结构化的中间数据**，不记模型内心活动。
+
+    没有 trace 的路径：生活补算与写日记（life_engine 自己落 journal）。
+    没有它就只能靠 SSH 上去 grep 日志，"她为什么这么答"永远查不清。
+
     写文件失败一律静默：观测手段不能反过来把聊天搞挂。
     """
     try:
@@ -97,13 +121,20 @@ def _trace_write(rec):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        _trace_trim(p)
     except Exception:
         pass
 
 
 def _trace_tail(n=20):
+    """最近 n 条 trace。
+
+    用 deque(maxlen=n) 边读边丢：以前是先把整个文件解析进 list 再切尾巴，
+    /api/stats 每次都把全天的 trace 读进内存一遍（文件越大越慢）。
+    """
+    from collections import deque
     p = _trace_path()
-    out = []
+    out = deque(maxlen=max(1, int(n or 20)))
     try:
         with open(p, encoding="utf-8") as f:
             for line in f:
@@ -116,7 +147,7 @@ def _trace_tail(n=20):
                     continue
     except OSError:
         return []
-    return out[-int(n or 20):]
+    return list(out)
 
 
 # 供路由统计用（_stats_today 在 server.py，因为还要搭 brain/voice 的状态）

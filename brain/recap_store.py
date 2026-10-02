@@ -209,8 +209,12 @@ def _save_state(s):
 def pending_rows(rows, upto):
     """还没压、且已经滑出窗口的行。返回 (选中行, 新的水位线)
 
-    批次按**天**对齐：不在一批里把某一天截成两半 —— 否则同一天会被压成
+    批次尽量按**天**对齐：不在一批里把某一天截成两半 —— 否则同一天会被压成
     两段摘要，话题在中间断掉，读起来就是"上半截没说完就换了件事"。
+
+    但"一天自己就超过 BATCH_MAX"是例外，必须硬切（见下）：compress_day 会把正文
+    截到 8000 字，几百条一口气喂进去的话，后面的内容等于从来没被压过 ——
+    而水位线已经推过去了，那些行会被永久跳过。
     """
     if not rows:
         return [], 0
@@ -223,19 +227,22 @@ def pending_rows(rows, upto):
     sel = [r for r in rows if upto < r[0] <= end]
     if len(sel) <= BATCH_MAX:
         return sel, end
-    cut, cnt, last_day = 0, 0, None
+    cut, cnt, last_day, days = 0, 0, None, 0
     for r in sel:
         d = r[1][:10] or "未知"
         if d != last_day:
             if cnt >= BATCH_MAX:
-                break
+                break                  # 这一批到此为止，切点是上一天的结尾
             last_day = d
+            days += 1
         cnt += 1
         cut += 1
-    if cut == 0:                       # 某一天自己就超了上限 —— 只能切
-        sel = sel[:BATCH_MAX]
-    else:
-        sel = sel[:cut]
+    # 一批里只遇到过一天（或干脆没选中）→ 这一天自己就超了上限，只能硬切。
+    # 老代码写的是 `if cut == 0`，而 cut 在第一轮就至少是 1，那个分支永远不成立 ——
+    # 于是一天不管有多少条都会一次性喂给模型（实测 576 条全进一批）。
+    if days <= 1:
+        cut = min(cut or BATCH_MAX, BATCH_MAX)
+    sel = sel[:cut]
     return sel, (sel[-1][0] if sel else upto)
 
 

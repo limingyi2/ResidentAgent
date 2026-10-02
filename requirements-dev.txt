@@ -1,0 +1,16 @@
+# 跑测试所需的最小依赖。
+#
+#   python -m unittest discover -s tests -t tests
+#
+# 这套用例**不联网、不读真实 config、不花钱**：embedding 被替换成确定性假向量，
+# 文件类用例一律走临时目录。所以只需要下面这两个 ——
+# brain/ 在 import 阶段就要它们；fastembed 和 PIL 是惰性导入（函数内才 import），
+# 测试路径用不到。
+#
+# 要真跑服务/桌宠/App，请装 brain/requirements.txt 与 pet/requirements.txt。
+numpy>=2.5.3
+httpx>=0.28.1
+
+# 可选：装了 pytest 也能直接收集这套用例（用例写成 stdlib unittest 风格，
+# 两种 runner 都能跑）。
+# pytest>=8.0

@@ -16,6 +16,7 @@ BAAI/bge-m3 与 BAAI/bge-large-zh-v1.5，均为 1024 维。换模型会让旧向
 - 提取：优先 API（OpenAI 兼容），失败 / 无 key 自动降级规则提取
 """
 import json, os, re, time
+import threading
 import numpy as np
 import httpx
 
@@ -136,8 +137,35 @@ def get_default_store():
     return MemoryStore(os.path.join(d, "memory.json"))
 
 
+def _synchronized(fn):
+    """给实例方法套上它自己那把 RLock（可重入，嵌套调用不会自锁）。
+
+    只用来包"碰内存状态或落盘"的方法；网络调用（embed_texts）不进锁，
+    见 MemoryStore.add 的注释。
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(self, *a, **kw):
+        with self._lock:
+            return fn(self, *a, **kw)
+    return wrapper
+
+
 class MemoryStore:
+    """一个记忆库实例。
+
+    实例自带一把 RLock：**记忆写入跑在后台线程里**（brain._extract_bg），而请求线程
+    同时可能在 retrieve()/render() 读同一份索引 —— 两边都会碰 self.data["items"]、
+    self._ids/_rows 和 vectors.npy / memory.json。没有锁的话并发写盘是可达的，
+    后果是记忆库或向量索引损坏（而且损坏是静默的，下次启动才发现）。
+
+    纪律：**网络调用（embed_texts）不放在锁里** —— 否则一次 embedding 超时会把
+    检索一起堵住。锁只保护内存状态与落盘。
+    """
+
     def __init__(self, path, embed_dir=None):
+        self._lock = threading.RLock()      # 先于 _load()：读盘也要在锁里
         self.path = path
         self.embed_dir = embed_dir or os.path.dirname(os.path.abspath(path))
         self.data = {"items": [], "meta": {"created": time.strftime("%Y-%m-%d %H:%M")}}
@@ -171,12 +199,14 @@ class MemoryStore:
                 items.append({"id": f"e{len(items)}", "type": "event", "text": e.get("text", ""), "time": e.get("time", "")})
             self.data = {"items": items, "meta": {"created": time.strftime("%Y-%m-%d %H:%M")}}
 
+    @_synchronized
     def save(self):
         os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, ensure_ascii=False, indent=2)
 
     # --- 向量索引 ---
+    @_synchronized
     def _load_index(self):
         """把向量索引读进内存。只在第一次调用时产生磁盘 IO，之后检索零读盘"""
         if self._index_loaded:
@@ -295,37 +325,49 @@ class MemoryStore:
 
     # --- 写入 ---
     def add(self, text, mtype="event"):
-        """添加一条记忆（自动向量化）"""
-        text = text.strip()
+        """添加一条记忆（自动向量化）。
+
+        本方法是唯一会从**别的线程**跑的写入口（brain 里记忆抽取是后台线程），
+        所以它不用 _synchronized 整包：embed_texts 是网络调用，放在锁外，
+        免得一次 embedding 超时把请求线程的检索一起堵住。
+        """
+        text = (text or "").strip()
         if not text:
             return
-        for it in self.data["items"]:
-            if it["text"] == text:
+        with self._lock:
+            for it in self.data["items"]:
+                if it["text"] == text:
+                    return
+        vs = embed_texts([text])                    # 网络调用：不进锁
+        with self._lock:
+            # 等 embedding 这一会儿，别的线程可能已经把同一条写进去了，再查一次
+            for it in self.data["items"]:
+                if it["text"] == text:
+                    return
+            item = {"id": f"m{int(time.time()*1000)}{len(self.data['items'])}",
+                    "type": mtype, "text": text,
+                    "time": time.strftime("%Y-%m-%d %H:%M")}
+            self.data["items"].append(item)
+            self.save()
+            # 向量化并追加到内存索引
+            self._load_index()
+            if item["id"] in self._imap:
                 return
-        item = {"id": f"m{int(time.time()*1000)}{len(self.data['items'])}",
-                "type": mtype, "text": text,
-                "time": time.strftime("%Y-%m-%d %H:%M")}
-        self.data["items"].append(item)
-        self.save()
-        # 向量化并追加到内存索引
-        self._load_index()
-        if item["id"] in self._imap:
-            return
-        vs = embed_texts([text])
-        if not vs:
-            return                                  # 向量化不了也先把记忆存下来
-        v = vs[0]
-        if self._rows and v.shape[0] != self._rows[0].shape[0]:
-            self._reset_index()                     # 维度变了，交给 _backfill 全量重算
-            self._backfill()
-            return
-        self._imap[item["id"]] = len(self._rows)
-        self._ids.append(item["id"])
-        self._rows.append(v)
-        self._mat = None
-        self._dim = v.shape[0]
-        self._save_index()
+            if not vs:
+                return                              # 向量化不了也先把记忆存下来
+            v = vs[0]
+            if self._rows and v.shape[0] != self._rows[0].shape[0]:
+                self._reset_index()                 # 维度变了，交给 _backfill 全量重算
+                self._backfill()
+                return
+            self._imap[item["id"]] = len(self._rows)
+            self._ids.append(item["id"])
+            self._rows.append(v)
+            self._mat = None
+            self._dim = v.shape[0]
+            self._save_index()
 
+    @_synchronized
     def delete(self, item_id):
         self.data["items"] = [i for i in self.data["items"] if i["id"] != item_id]
         self.save()
@@ -339,12 +381,19 @@ class MemoryStore:
             self._mat = None
             self._save_index()
 
+    @_synchronized
     def list_items(self):
         return list(self.data["items"])
 
     # --- 向量检索 ---
+    @_synchronized
     def retrieve(self, query, top_k=5, min_score=0.25):
-        """按语义相似度返回 Top-K 记忆文本。索引在内存里，不逐条读盘"""
+        """按语义相似度返回 Top-K 记忆文本。索引在内存里，不逐条读盘
+
+        整段在锁里（含 embed_texts）：检索走的是请求线程，而对话本身已被
+        server 的全局锁串行化，所以这里不会真的和别的检索并发 ——
+        进锁是为了挡住后台记忆写入线程正在改 _ids/_rows/_mat。
+        """
         if not self.data["items"]:
             return []
         self._load_index()
@@ -371,6 +420,7 @@ class MemoryStore:
                 out.append((s, t))
         return out
 
+    @_synchronized
     def render(self, query=None, top_k=5, max_items=20, min_score=0.40):
         """注入块：有 query 用检索，无 query 用最近 max_items 条。
 
@@ -387,6 +437,7 @@ class MemoryStore:
             return ""
         return "你记得他的事（这些是真的，聊天时自然地用上）：\n" + "；".join(i["text"] for i in items)
 
+    @_synchronized
     def stats(self):
         """记忆库概况，排查用"""
         self._load_index()

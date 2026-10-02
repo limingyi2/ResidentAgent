@@ -164,7 +164,7 @@ body.notab .page { bottom:0; }
   <div class="body">
     <div class="grp">
       <div class="cell" onclick="openProfile()"><div class="cav" id="ctAv"></div>
-        <div class="cmain"><div class="cname">角色</div></div></div>
+        <div class="cmain"><div class="cname" data-who>她</div></div></div>
       <div class="cell" onclick="tip('用于中转文件，敬请期待')"><div class="cav" style="background:#e6f7ff;color:#3aa3ff">传</div>
         <div class="cmain"><div class="cname">文件传输助手</div></div></div>
     </div>
@@ -230,7 +230,7 @@ body.notab .page { bottom:0; }
 
 <!-- 聊天页 -->
 <div class="page" id="page-chat">
-  <div class="topbar"><div class="bk" onclick="openPage('list')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">角色</div></div>
+  <div class="topbar"><div class="bk" onclick="openPage('list')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt" data-who>她</div></div>
   <div class="chat-body" id="list"></div>
   <div class="typing" id="typing" style="display:none">对方正在输入…</div>
   <div id="imgPrev"><img id="prevImg"><span>图片已附上，可以再写句话一起发</span><b onclick="cancelImg()">移除</b></div>
@@ -249,7 +249,7 @@ body.notab .page { bottom:0; }
 <div class="page" id="page-moments">
   <div class="topbar"><div class="bk" onclick="openPage('discover')"><svg viewBox="0 0 24 24" fill="none" stroke="#191919" stroke-width="2.2"><path d="M15 4 L7 12 L15 20"/></svg></div><div class="tt">朋友圈</div></div>
   <div class="body" id="momBody">
-    <div class="cover"><div class="mname">角色</div><div class="mav" id="momAv"></div></div>
+    <div class="cover"><div class="mname" data-who>她</div><div class="mav" id="momAv"></div></div>
     <div style="height:44px"></div>
     <div id="momList"></div>
     <div style="text-align:center;font-size:11.5px;color:#c8c8c8;padding:16px 0" id="momFoot">加载中…</div>
@@ -275,7 +275,7 @@ body.notab .page { bottom:0; }
   <div class="body">
     <div class="prof">
       <div class="cav" id="pfAv"></div>
-      <div class="pn">角色</div>
+      <div class="pn" data-who>她</div>
       <div class="pr">ID：linzhixia　地区：四川 成都</div>
     </div>
     <button class="pbtn" onclick="openChat()">发消息</button>
@@ -451,7 +451,15 @@ function nowStr() {
   return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate())
     + ' ' + p(n.getHours()) + ':' + p(n.getMinutes());
 }
-function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+// 转义成"能放进正文、也能放进双引号属性"的形式。
+// 以前是 textContent→innerHTML：只转 < > &，**不转引号** —— 而它被用在
+// data-mid="…"、src="…" 这类属性里，值里带一个引号就能突破属性。
+// （正文那条路走 textContent，本来就不会被注入，这里补的是属性那一路。）
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 // 他的消息里混着服务端塞给她的内部提示（视觉描述、发图通知等），是给她看的标记，气泡里一律剥掉。
 function cleanMine(s) {
   return String(s == null ? '' : s)
@@ -492,9 +500,21 @@ function errLocalList() {
 }
 window.addEventListener('error', e => errLocal('页面', e.error || e.message));
 window.addEventListener('unhandledrejection', e => errLocal('异步', e.reason));
-// 包一层 fetch：所有网络失败自动记一笔（省得在每个调用点手写 try）
+// 包一层 fetch：所有网络失败自动记一笔（省得在每个调用点手写 try），
+// 顺便统一带上鉴权头，并把 URL 里那份 token 摘掉 ——
+// token 拼在 URL 上会进各级访问日志和 Referer；只有 <img>/<audio> 这种
+// 设不了头的媒体请求才继续用 ?token=（服务端两种都认）。
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function (u, o) {
+  o = o || {};
+  if (TOKEN && typeof u === 'string' && u.indexOf(BASE) === 0) {
+    try {
+      const h = new Headers(o.headers || {});
+      if (!h.has('Authorization')) h.set('Authorization', 'Bearer ' + TOKEN);
+      o.headers = h;
+      u = u.replace(/([?&])token=[^&]*&?/g, '$1').replace(/[?&]$/, '');
+    } catch (e) { /* Headers 不可用就照旧走 URL 里的 token */ }
+  }
   const tag = String(u || '').split('?')[0].replace(/^https?:\/\/[^/]+/, '');
   return _rawFetch(u, o).then(function (r) {
     if (r && r.status >= 500) errLocal('服务端' + r.status, tag + ' → HTTP ' + r.status, 'WARN');
@@ -724,10 +744,32 @@ try {
     _ro = new ResizeObserver(() => { if (autoPin) pinNow(); });
   }
 } catch (e) {}
-function copyText(s) {
+// 复制到剪贴板（okMsg 可自定义提示）。
+// WebView 里 navigator.clipboard 常不可用（http 不是安全上下文），必须带 execCommand 兜底。
+// 以前同一个作用域里定义了**两次** copyText、另有一个 copyTextCompat，最后那个把前面
+// 全盖掉，于是"已复制"的提示成了死代码。现在只剩这一个。
+function copyText(s, okMsg) {
+  s = String(s == null ? '' : s);
   if (!s) return;
-  if (navigator.clipboard) navigator.clipboard.writeText(s).then(() => tip('已复制'), () => {});
-  else tip('长按选择复制');
+  const ok = okMsg || '已复制';
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = s;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, s.length);
+      const done = document.execCommand('copy');
+      document.body.removeChild(ta);
+      tip(done ? ok : '复制失败');
+    } catch (e) { tip('长按选择复制'); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(s).then(() => tip(ok), fallback);
+  } else {
+    fallback();
+  }
 }
 let histSig = '';
 let msgNodes = [];                  // [{key, els}] —— 增量渲染时用来删掉滑出窗口的旧消息
@@ -883,8 +925,12 @@ async function sendText(t, img) {
     // 立刻对一次服务端历史：乐观气泡被摘掉、换成存档版，重开 App 也不会错位
     loadHistory(true);
   } catch (e) {
-    addMsg('assistant', '', '');
-    tip('连不上她：去 我-设置-测试连接 看具体原因', 4000);
+    // 别画一个空的"她"的气泡假装她回了：这条消息其实**没发出去**，
+    // 下一次拉历史它就消失了 —— 用户以为发出去了、她没理。把原话放回输入框。
+    const inp = $('input');
+    if (inp && !inp.value.trim()) inp.value = t || '';
+    tip('没发出去，内容已放回输入框' + (img ? '（图要重选）' : '') +
+        '：去 我-设置-测试连接 看具体原因', 4200);
   }
   $('typing').style.display = 'none';
 }
@@ -915,7 +961,7 @@ function renderSess(items) {
   $('sessList').innerHTML =
     '<div class="cell" onclick="openChat()">' +
       '<div class="cav" id="sessAv"></div>' +
-      '<div class="cmain"><div class="crow1"><div class="cname">角色</div>' +
+      '<div class="cmain"><div class="crow1"><div class="cname" data-who>她</div>' +
       '<div class="ctime">' + esc(last ? fmtT(last.t) : '') + '</div></div>' +
       '<div class="crow2"><div class="cprev">' + esc(prev) + '</div>' +
       (unread ? '<div class="dot"></div>' : '') + '</div></div></div>' +
@@ -1043,24 +1089,6 @@ function sendSticker(b64) {
 }
 
 /* --- 快递管理 --- */
-function copyTextCompat(s) {
-  // WebView 里 navigator.clipboard 常不可用（http 非安全上下文），兜底 execCommand
-  const fb = () => {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = s;
-      ta.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(ta);
-      ta.select();
-      ta.setSelectionRange(0, s.length);
-      const ok = document.execCommand('copy');
-      document.body.removeChild(ta);
-      tip(ok ? '单号已复制' : '复制失败');
-    } catch (e) { tip('复制失败'); }
-  };
-  if (navigator.clipboard) navigator.clipboard.writeText(s).then(() => tip('单号已复制'), fb);
-  else fb();
-}
 async function loadPackages() {
   const box = $('pkgList');
   box.innerHTML = '<div style="font-size:13px;color:#999;padding:12px">加载中…</div>';
@@ -1089,7 +1117,7 @@ async function loadPackages() {
         (p.latest ? '<div style="margin-top:3px;color:#888">最新：' + esc(p.latest) + '</div>' : '');
       const btns = document.createElement('div'); btns.className = 'pbtns';
       const bCopy = document.createElement('button'); bCopy.textContent = '复制单号';
-      bCopy.onclick = e => { e.stopPropagation(); copyTextCompat(p.number); };
+      bCopy.onclick = e => { e.stopPropagation(); copyText(p.number, '单号已复制'); };
       const bNote = document.createElement('button'); bNote.textContent = '改备注';
       bNote.onclick = e => { e.stopPropagation(); pkgEditNote(p); };
       const bDel = document.createElement('button'); bDel.textContent = '删除';
@@ -1258,13 +1286,32 @@ async function loadStats(manual) {
     if (manual) tip('已刷新');
   } catch (e) { if (manual) tip('拿不到用量，检查网络'); }
 }
+function applyWho(name) {
+  const n = (name || '').trim();
+  if (!n) return;
+  document.querySelectorAll('[data-who]').forEach(el => { el.textContent = n; });
+  document.title = n;
+  try { localStorage.setItem('zx_who', n); } catch (e) {}
+  // 同步给原生：通知标题要用她的名字，不能写死
+  try { if (window.Android && window.Android.saveWho) window.Android.saveWho(n); } catch (e) {}
+}
+async function loadPersonaName() {
+  // 先用上次缓存把界面填上，避免首屏空白；再拉一次以免换过人设还显旧的
+  try { const c = localStorage.getItem('zx_who'); if (c) applyWho(c); } catch (e) {}
+  try {
+    const r = await fetch(api('/api/persona'));
+    const d = await r.json();
+    if (d && d.name) applyWho(d.name);
+  } catch (e) {}
+}
 async function loadPersonas() {
   const cur = $('personaCur'), box = $('personaList');
   cur.value = '加载中…'; box.innerHTML = '';
   try {
     const r = await fetch(api('/api/persona'));
     const d = await r.json();
-    cur.value = d.name || '角色';
+    cur.value = d.name || '（未设置人设）';
+    applyWho(d.name);
     personaKeys = {};
     (d.presets || []).forEach(p => {
       personaKeys[p.key] = p;
@@ -1557,15 +1604,6 @@ async function currentLogText() {
   } catch (e) { return fmtLog(errLocalList()); }
 }
 
-function copyText(t) {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = t; ta.style.position = 'fixed'; ta.style.left = '-9999px';
-    document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); document.body.removeChild(ta);
-  } catch (e) {}
-}
-
 async function exportLog() {
   const text = await currentLogText(), name = logFileName();
   if (window.Android && window.Android.saveLog) {
@@ -1704,6 +1742,7 @@ async function checkUpdate(manual) {
     }, 900);
   } else $('splash').style.display = 'none';
   loadHistory(true);
+  loadPersonaName();
   loadStickers();
   checkUpdate(false);
   setInterval(() => { if (curPage === 'chat' || curPage === 'list') loadHistory(); }, 12000);

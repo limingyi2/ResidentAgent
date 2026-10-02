@@ -17,6 +17,9 @@
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher">
+        <!-- usesCleartextTraffic 是**必须**的：服务地址由用户在设置页填，
+             服务端只有纯 HTTP（没有 TLS），静态的 networkSecurityConfig
+             没法预先声明一个运行时才知道的域名。要收掉它就得先给服务端上 HTTPS。 -->
 
         <activity
             android:name=".MainActivity"

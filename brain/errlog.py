@@ -117,7 +117,7 @@ def as_text(n=200, src="server"):
     items = recent(n, src)
     if not items:
         return "（没有错误记录）\n"
-    head = ("# 角色 错误日志（%s）\n# 导出时间：%s\n# 共 %d 条\n\n"
+    head = ("# 错误日志（%s）\n# 导出时间：%s\n# 共 %d 条\n\n"
             % ("云上" if src == "server" else "手机",
                time.strftime("%Y-%m-%d %H:%M:%S"), len(items)))
     buf = [head]
@@ -157,17 +157,43 @@ def stats():
 
 
 def install_excepthook():
-    """把没被 try 住的异常也记下来 —— 线程里静默死掉的异常尤其容易漏。"""
+    """把没被 try 住的异常也记下来。
+
+    两条路必须都装，少一条就漏一半：
+    - sys.excepthook        → 主线程的未捕获异常
+    - threading.excepthook  → 子线程的未捕获异常（Python 3.8+）
+
+    只装前者的话，服务里那 6 条后台 daemon 线程静默死掉时一个字都不会留下 ——
+    而它们恰恰是最容易"死了没人发现"的地方（主动搭话、摘要、朋友圈、生活循环）。
+    """
+    import sys
+    import threading
+
     def hook(etype, e, tb):
         try:
-            log("thread", e, trace="".join(
+            log("main", e, trace="".join(
                 traceback.format_exception(etype, e, tb))[-1500:])
         except Exception:
             pass
-        import sys
         sys.__excepthook__(etype, e, tb)
-    import sys
+
+    def thread_hook(args):
+        try:
+            log("thread", args.exc_value, trace="".join(
+                traceback.format_exception(args.exc_type, args.exc_value,
+                                           args.exc_traceback))[-1500:])
+        except Exception:
+            pass
+        # 交回默认处理（只打印、不终止进程），行为和没装钩子时一致
+        try:
+            threading.__excepthook__(args)
+        except Exception:
+            traceback.print_exception(args.exc_type, args.exc_value,
+                                      args.exc_traceback)
+
     sys.excepthook = hook
+    if hasattr(threading, "excepthook"):        # 3.8+
+        threading.excepthook = thread_hook
 
 
 if __name__ == "__main__":

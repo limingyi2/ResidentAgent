@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""角色 · 对话大脑
+"""对话大脑
 
 只有 "api" 一种模式（config.json 的 chat_mode）：直接让 API 产出她的话，
 事实准、会用记忆、守人设。本地 Qwen3-4B + LoRA 那套和 two_stage 均已移除。
@@ -78,7 +78,7 @@ LIFE_RULES = (
     "累了、烦了也可以就那个样子，不用硬装开心\n"
     "- 可以主动提起你今天的事（比如刚下课吃到的东西、刚遇到的破事），"
     "但一次只说一件，别一口气把一整天都报出来，"
-    "而且同一件事别翻来覆去提（提过图书馆/某门课就先聊点别的）\n"
+    "而且同一件事别翻来覆去提（提过吃饭/某门课就先聊点别的）\n"
     "- 他正在讲他自己的事、尤其是不开心的事时，先听他说完，别急着讲你自己；"
     "但不许用安慰腔（“会好起来的”“有我呢”），要么问一句，要么说你的看法\n"
     "- 提的时候像随口聊到，别像汇报日程，也不要念课表\n"
@@ -99,6 +99,34 @@ LIFE_RULES = (
 # 必须在出口剥掉。日期段允许 1~2 组：`_stamp()` 产出两组的 `[MM-DD HH:MM]`，
 # 只覆盖三组 `[YYYY-MM-DD HH:MM]` 时两组的会漏网。两个出口共用这个常量，免得改一处漏一处。
 _TIME_TAG_RE = re.compile(r"^\[\d{1,4}(?:-\d{1,2}){1,2}(?:[ T]\d{1,2}:\d{2})?\]\s*")
+
+# 剥"名字：正文"这种前缀。名字**从人设动态取**（name + nicknames），
+# 不写死 —— 换了人设角色名这里就跟着变，少一处会漏的地方。
+# 人设没填名字时退化为"不剥"，而不是留下一组无关的名字硬剥。
+_NAME_PREFIX_CACHE = {"sig": None, "re": None}
+
+
+def _name_prefix_re():
+    """匹配行首的"角色名："这类前缀，返回可用的正则或 None。"""
+    try:
+        import persona_store
+        p = persona_store.load()
+    except Exception:
+        return None
+    names = []
+    for n in ([p.get("name")] + list(p.get("nicknames") or [])):
+        n = (n or "").strip()
+        # 名字太短（1 个字）容易误伤正文（"我：……"之类），只收 2 字以上
+        if len(n) >= 2 and n not in names:
+            names.append(n)
+    if not names:
+        return None
+    sig = "|".join(sorted(names))
+    if _NAME_PREFIX_CACHE["sig"] != sig:
+        alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+        _NAME_PREFIX_CACHE["re"] = re.compile(r"^(?:%s)\s*[:：]\s*" % alt)
+        _NAME_PREFIX_CACHE["sig"] = sig
+    return _NAME_PREFIX_CACHE["re"]
 
 
 def _clean(s, keep_newlines=False):
@@ -121,11 +149,13 @@ def _clean(s, keep_newlines=False):
     # 上下文里每条历史都带 `[09-29 06:18] `（见 Brain._stamp），便宜模型会
     # 把它当正文模仿。HIST_TIME_NOTE 里明写了不要模仿，但它位置靠前、
     # 注意力不够 —— 与其指望模型守规矩，不如在必经出口直接剥掉，只剥开头的。
+    name_re = _name_prefix_re()
     if keep_newlines:
         out = []
         for ln in s.split("\n"):
             ln = _TIME_TAG_RE.sub("", ln)
-            ln = re.sub(r"^(角色|角色|角色|角色)\s*[:：]\s*", "", ln)
+            if name_re:
+                ln = name_re.sub("", ln)
             ln = re.sub(r"^[\"“”「」『』\s]+", "", ln)
             ln = re.sub(r"[\"“”「」『』\s]+$", "", ln)
             ln = re.sub(r"\s{2,}", " ", ln).strip()
@@ -134,7 +164,8 @@ def _clean(s, keep_newlines=False):
         return "\n".join(out)
 
     s = _TIME_TAG_RE.sub("", s)
-    s = re.sub(r"^(角色|角色|角色|角色)\s*[:：]\s*", "", s)
+    if name_re:
+        s = name_re.sub("", s)
     # 引号首尾都要去：只去开头的话，"“你好”" 会剩个尾巴
     s = re.sub(r"^[\"“”「」『』\s]+", "", s)
     s = re.sub(r"[\"“”「」『』\s]+$", "", s)
@@ -393,7 +424,7 @@ class Brain:
         if life:
             parts.append("\n" + life)
         # 约定账本（agenda）：有日期、说好的事按日期强制带上，不靠语义碰运气 ——
-        # "票买了吗"这种短句压根不检索，"放假了还上早八"排第 13 名召不回。
+        # "票买了吗"这种短句压根不检索，"放假第一天要上班"排第 13 名召不回。
         # 放在生活块之后是故意的：冲突时它离输出更近，更能压过日常设定。
         try:
             import agenda
@@ -438,36 +469,61 @@ class Brain:
         }
         self.last_usage = None
         self.last_ms = None
+        self.last_err = ""
         _t0 = time.time()
-        try:
-            r = httpx.post(
-                self.api["api_base"].rstrip("/") + "/chat/completions",
-                headers={"Authorization": "Bearer " + self.api["api_key"]},
-                json={"model": self.api.get("model", "deepseek-chat"),
-                      "messages": msgs,
-                      # 90 个 token 只够 60~90 个汉字，她想多说两句就被硬截断
-                      "temperature": 0.85, "max_tokens": 200,
-                      # GLM 系默认先思考几百字，聊天气泡等不起 —— 关到最低档
-                      "reasoning_effort": "low"},
-                timeout=60,
-            )
-            r.raise_for_status()
-            _j = r.json()
-            self.last_ms = int((time.time() - _t0) * 1000)
-            # token 用量：上游在 usage 里回，拿不到就算了 ——
-            # 没有它就只能看余额，出问题要很晚才发现
+        # 重试一次，但只重试"下一次可能就好了"的错：网络异常 / 超时 / 429 / 5xx。
+        # 401、402 这类重试没用还照样费钱 —— 欠费那次就是不重试才没把额度再烧一遍。
+        # 代价是最坏情况延迟翻倍（60s → 120s），所以 server 侧拿锁有超时兜着。
+        _last_exc = None
+        for _attempt in range(2):
+            _retry = False
             try:
-                _u = _j.get("usage") or {}
-                self.last_usage = {"in": int(_u.get("prompt_tokens") or 0),
-                                   "out": int(_u.get("completion_tokens") or 0)}
-            except Exception:
-                self.last_usage = None
-            return _clean(_j["choices"][0]["message"]["content"],
-                          keep_newlines=True)
-        except Exception as e:
-            self.last_ms = int((time.time() - _t0) * 1000)
-            self.last_err = "%s: %s" % (type(e).__name__, str(e)[:120])
-            return None
+                r = httpx.post(
+                    self.api["api_base"].rstrip("/") + "/chat/completions",
+                    headers={"Authorization": "Bearer " + self.api["api_key"]},
+                    json={"model": self.api.get("model", "deepseek-chat"),
+                          "messages": msgs,
+                          # 90 个 token 只够 60~90 个汉字，她想多说两句就被硬截断
+                          "temperature": 0.85, "max_tokens": 200,
+                          # GLM 系默认先思考几百字，聊天气泡等不起 —— 关到最低档
+                          "reasoning_effort": "low"},
+                    timeout=60,
+                )
+                if r.status_code == 429 or r.status_code >= 500:
+                    _last_exc = RuntimeError("HTTP %d %s"
+                                             % (r.status_code, r.reason_phrase))
+                    _retry = True
+                else:
+                    r.raise_for_status()
+                    _j = r.json()
+                    self.last_ms = int((time.time() - _t0) * 1000)
+                    # token 用量：上游在 usage 里回，拿不到就算了 ——
+                    # 没有它就只能看余额，出问题要很晚才发现
+                    try:
+                        _u = _j.get("usage") or {}
+                        self.last_usage = {
+                            "in": int(_u.get("prompt_tokens") or 0),
+                            "out": int(_u.get("completion_tokens") or 0)}
+                    except Exception:
+                        self.last_usage = None
+                    return _clean(_j["choices"][0]["message"]["content"],
+                                  keep_newlines=True)
+            except httpx.HTTPStatusError as e:
+                _last_exc = e
+                _c = getattr(e.response, "status_code", 0)
+                _retry = (_c == 429 or _c >= 500)
+            except Exception as e:                  # 连不上 / 超时 / 解析失败
+                _last_exc = e
+                _retry = True
+            if not _retry or _attempt == 1:
+                break
+            print("[大脑] 上游这次没成（%s），隔 1.5 秒重试一次"
+                  % type(_last_exc).__name__, flush=True)
+            time.sleep(1.5)
+        self.last_ms = int((time.time() - _t0) * 1000)
+        self.last_err = "%s: %s" % (type(_last_exc).__name__,
+                                    str(_last_exc)[:120])
+        return None
 
     # --- 朋友圈专用：不走聊天框架 ---
     def moment(self, prompt, max_tokens=260):

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""角色 · 云端大脑服务（组装与路由层）。
+"""云端大脑服务（组装与路由层）。
 
 远程大脑 API（端口 8788）：手机 App 与桌宠都连它聊天，记忆/人设/上下文
 只有云上这一份；生活补算、日记、朋友圈、主动搭话也都在这个进程里跑。
@@ -12,8 +12,10 @@ import os
 import sys
 import json
 import time
+import hmac
 import base64
 import threading
+import contextlib
 import http.server
 
 from runtime import (
@@ -96,7 +98,7 @@ def build_local_brain(verbose=True):
 
     try:
         from life_engine import LifeEngine
-        eng = LifeEngine(api_config, name=(b.persona.get("name") or "角色"))
+        eng = LifeEngine(api_config, name=(b.persona.get("name") or ""))
         if eng.enabled:
             b.life = eng
             if verbose:
@@ -108,24 +110,107 @@ def build_local_brain(verbose=True):
     return b
 
 
-def _chat_with_tools(text, img_path):
+# 聊天锁的等待上限（秒）。一次 chat 最坏要多久：模型调用 60s + 重试一次 60s，
+# 工具循环还会再走一轮 —— 所以排队上限要比这更大。超了就明说"在忙"，
+# 而不是像以前那样无超时地挂着（一个 120 秒的请求能把后面所有人堵死）。
+CHAT_LOCK_WAIT = 240
+
+# 单次请求体上限（字节）。正常聊天几 KB，带图 base64 也就几 MB；
+# 12MB 足够用，同时挡住"报个超大 Content-Length 把内存打满"这条路。
+MAX_BODY = 12 * 1024 * 1024
+
+
+class _Busy(Exception):
+    """等聊天锁超时：这一轮没轮到脑子。"""
+
+
+@contextlib.contextmanager
+def _chat_lock(timeout=CHAT_LOCK_WAIT):
+    """有上限地拿聊天锁（超时抛 _Busy，不无限期阻塞）。"""
+    lock = _LOCAL["lock"]
+    if not lock.acquire(timeout=timeout):
+        raise _Busy("等聊天锁超过 %d 秒" % timeout)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def _is_loopback(ip):
+    """是不是本机回环地址（含 ::1）。"""
+    s = str(ip or "").strip().strip("[]").lower()
+    return s in ("127.0.0.1", "::1", "localhost") or s.startswith("127.")
+
+
+def _auth_ok(auth_header, query_token, config_token, peer_ip):
+    """鉴权判定（纯函数，方便直接测）。
+
+    - 配了 token：Authorization 头优先，?token= 兼容老客户端（<img>/<audio>
+      设不了头，只能走 query）；用 compare_digest 比，`==` 会在第一个不同的
+      字符上短路，长度和前缀可以被计时探测出来。
+    - **没配 token：只放行本机回环**。以前是"没配就全放行"（fail-open），
+      配上 bind_host: 0.0.0.0 就等于把整个 API 摆到公网 —— 而忘记填 token
+      恰恰是最常见的情况。
+    """
+    if not config_token:
+        return _is_loopback(peer_ip)
+    got = str(auth_header or "")
+    if got.startswith("Bearer "):
+        got = got[7:]
+    if not got:
+        got = str(query_token or "")
+    if not got:
+        return False
+    try:
+        return hmac.compare_digest(got, str(config_token))
+    except Exception:
+        return False
+
+
+def _snapshot(b):
+    """把这一轮的 trace 字段从大脑上抄下来。
+
+    **必须在持锁时调用**：last_sizes / last_hits / last_ms / last_usage 都长在
+    共享的 Brain / MemoryStore 上，出锁再读会被并发那一轮覆盖。
+    """
+    hits = getattr(getattr(b, "mem", None), "last_hits", None) or []
+    usage = getattr(b, "last_usage", None) or {}
+    return {
+        "blocks": getattr(b, "last_sizes", None) or {},
+        "mem_hits": len(hits),
+        "mem_top": [round(float(s), 2) for s, _t in hits[:3]],
+        "ms": getattr(b, "last_ms", None),
+        "tok_in": usage.get("in"), "tok_out": usage.get("out"),
+        "model": str((API_CFG or {}).get("model") or ""),
+    }
+
+
+def _chat_with_tools(text, img_path, trace_out=None):
     """聊一轮，带模型自选工具：她写了 [tool:名] 就执行并喂回结果让她重答。
 
     开关 tools 关了就走普通聊天。锁在每轮 chat 里拿 —— 工具查询本身不碰
     大脑，别抱着锁去等 UAPI 的网络超时。
     """
     def _once(t):
-        with _LOCAL["lock"]:
-            return _LOCAL["brain"].chat(t, img=img_path, log=False)
+        with _chat_lock():
+            b = _LOCAL["brain"]
+            ans, mode = b.chat(t, img=img_path, log=False)
+            # trace 字段长在共享的大脑对象上，必须趁锁还在手里抄一份 ——
+            # 出了锁再读，并发的那一轮会把它覆盖掉（trace 张冠李戴）
+            if trace_out is not None and not trace_out:
+                trace_out.update(_snapshot(b))
+            return ans, mode
 
     try:
         import features as _feat
         if not _feat.on("tools"):
             # 开关关了不执行查询，但人设里的工具规则还在（prompt 是拼好的），
-            # 模型仍可能写标签 —— 照样清扫，绝不能漏给用户
+            # 模型仍可能写标签 —— 照样用宽口径清扫，绝不能漏给用户
             import tools as _tools
             ans, mode = _once(text)
-            return _tools.TOOL_TAG_RE.sub("", ans).strip(), mode
+            return _tools.TOOL_TAG_ANY_RE.sub("", ans).strip(), mode
+    except _Busy:
+        raise
     except Exception:
         pass
     import tools as _tools
@@ -135,11 +220,12 @@ def _chat_with_tools(text, img_path):
     return ans, mode
 
 
-def ask_with_retry(text, img_b64=None, display=None):
+def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
     """让她回一句话。
 
     img_b64：这一轮带的图片（base64），交给视觉模型让她"看见"。
     display：存档/给用户看的那份原文（不含系统注入的提示），None 就用 text。
+    trace_out：可选 dict；填上就在**持锁时**抄下这轮的 trace 字段（见 _snapshot）。
     返回 (她的话, 模式标签, 错误信息) —— 不抛异常，调用方好写。
 
     server.py 只有一种形态：本进程自带大脑，不再转发给桌宠。
@@ -187,9 +273,10 @@ def ask_with_retry(text, img_b64=None, display=None):
                         return ans, "本地自拍", ""
             except Exception as e:
                 print(f"[大脑] 自拍生成失败，回退正常对话：{e}", flush=True)
-            # 锁在 _chat_with_tools 的每轮 chat 里拿：工具查询/二轮模型调用
+            # 锁在 _chat_with_tools 的每轮 chat 里拿（带超时）：工具查询/二轮模型调用
             # 都不该抱着锁等网络，否则她的主动搭话会被这条消息堵住
-            ans, mode = _chat_with_tools(text, img_path or None)
+            ans, mode = _chat_with_tools(text, img_path or None,
+                                         trace_out=trace_out)
             # 剥掉万一学出来的「说」标记；[gen:xxx] 现场生成真图换成 [img:名字]
             look = _her_look()
             ans = resolve_gen_tags(strip_say_marker(ans), look)
@@ -204,6 +291,9 @@ def ask_with_retry(text, img_b64=None, display=None):
             except Exception as e:
                 print(f"[大脑] 存档失败（不影响回复）：{e}", flush=True)
             return ans, mode, ""
+        except _Busy:
+            # 排队超时：明确说出来，别让调用方无限期等（以前是挂死）
+            return "", "忙碌", "她正在回上一条，几秒后再发一次就好"
         except Exception as e:
             return "", "", f"{type(e).__name__}: {e}"
 
@@ -320,26 +410,27 @@ def _cloud_history(limit=60):
 
 
 def start_remote_api(brain):
-    """给"远程桌宠"开的门：桌宠是薄客户端，经 SSH 隧道连这个 API 用云上的大脑
+    """给"远程桌宠"和手机 App 开的门：客户端是薄壳，经隧道/直连用云上的大脑
     聊天 —— 记忆 / 人设 / 生活只有云上一份，天然同步。
 
-    只绑 127.0.0.1（公网碰不到），凭 token 鉴权。同一时间只允许一个进程养她。
+    只绑 127.0.0.1 是默认值（公网碰不到）；要让手机直连得显式配
+    bind_host: "0.0.0.0"，那时必须配 brain_token（没配就拒绝启动，见函数末尾）。
+    同一时间只允许一个进程养她。
     """
     tok = BRAIN_TOKEN
     port = 8788
 
     class _Handler(http.server.BaseHTTPRequestHandler):
         def _check(self):
-            if not tok:
-                return True
-            if (self.headers.get("Authorization") or "") == "Bearer " + tok:
-                return True
+            """鉴权（判定逻辑见模块级 _auth_ok：那边是纯函数，有测试盯着）。"""
             try:
                 from urllib.parse import urlparse, parse_qs
                 q = parse_qs(urlparse(self.path).query)
-                return (q.get("token") or [""])[0] == tok
+                qtok = (q.get("token") or [""])[0]
             except Exception:
-                return False
+                qtok = ""
+            return _auth_ok(self.headers.get("Authorization") or "",
+                            qtok, tok, self.client_address[0])
 
         def _json(self, code, out):
             data = json.dumps(out, ensure_ascii=False).encode("utf-8")
@@ -357,6 +448,14 @@ def start_remote_api(brain):
             note_client_ip(self.client_address[0])
             try:
                 n = int(self.headers.get("Content-Length") or 0)
+            except Exception:
+                n = 0
+            # 体积上限：带图的 /api/chat 走 base64，正常也就几 MB。
+            # 以前是 n 多大就读多大进内存，一个超大 Content-Length 就能把 2C2G 打满。
+            if n > MAX_BODY:
+                self._json(413, {"err": "body too large"})
+                return
+            try:
                 body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
             except Exception:
                 body = {}
@@ -385,36 +484,39 @@ def start_remote_api(brain):
                         _proactive_note_user()   # 他说话了：给自适应频率喂反馈
                     except Exception:
                         pass
+                    _snap = {}
                     ans, mode, err = ask_with_retry(
-                        _in_text, body.get("img") or None, display=_disp)
+                        _in_text, body.get("img") or None, display=_disp,
+                        trace_out=_snap)
                     # 出错就留一行（欠费 402、模型名写错、地址变了都在这儿现形）
                     if err:
                         try:
                             errlog.warn("api/chat", f"{mode}：{err}")
                         except Exception:
                             pass
-                    # 每轮一行 trace：这轮怎么产生的（记忆命中/块大小/延迟/token）
+                    # 每轮一行 trace：这轮怎么产生的（记忆命中/块大小/延迟/token）。
+                    # 字段来自 _snap（持锁时抄的），不在这里现读共享对象 —— 否则
+                    # 并发那一轮会把 last_hits/last_sizes 覆盖掉，trace 就张冠李戴
                     try:
-                        _b = _LOCAL.get("brain")
-                        _hits = getattr(getattr(_b, "mem", None), "last_hits", []) or []
                         _ag = 0
                         try:
                             import agenda
                             _ag = 1 if agenda.block() else 0
                         except Exception:
                             pass
-                        _u = getattr(_b, "last_usage", None) or {}
                         _trace_write({
                             "t": time.strftime("%Y-%m-%d %H:%M"),
                             "kind": "chat",
                             "in_len": len(_in_text),
-                            "blocks": getattr(_b, "last_sizes", {}) or {},
-                            "mem_hits": len(_hits),
-                            "mem_top": [round(float(s), 2) for s, _t in _hits[:3]],
+                            "blocks": _snap.get("blocks") or {},
+                            "mem_hits": _snap.get("mem_hits", 0),
+                            "mem_top": _snap.get("mem_top") or [],
                             "agenda": _ag,
-                            "model": str((API_CFG or {}).get("model") or ""),
-                            "ms": getattr(_b, "last_ms", None),
-                            "tok_in": _u.get("in"), "tok_out": _u.get("out"),
+                            "model": _snap.get("model")
+                            or str((API_CFG or {}).get("model") or ""),
+                            "ms": _snap.get("ms"),
+                            "tok_in": _snap.get("tok_in"),
+                            "tok_out": _snap.get("tok_out"),
                             "mode": mode,
                             "fallback": 1 if err or mode == "API失败" else 0,
                         })
@@ -436,19 +538,79 @@ def start_remote_api(brain):
                                       str(body.get("note") or ""))
                     self._json(200, {"ok": bool(p), "rec": p})
                 elif path == "/api/proactive":
-                    with _LOCAL["lock"]:
-                        ans, mode = brain.speak_on_scene(
-                            str(body.get("scene") or ""))
+                    try:
+                        with _chat_lock():
+                            ans, mode = brain.speak_on_scene(
+                                str(body.get("scene") or ""))
+                    except _Busy:
+                        self._json(200, {"reply": "", "mode": "忙碌",
+                                         "err": "她正忙着，等会儿再说"})
+                        return
                     self._json(200, {"reply": ans, "mode": mode, "err": ""})
                 elif path == "/api/reset":
-                    with _LOCAL["lock"]:
-                        if hasattr(brain, "reset"):
-                            brain.reset()
+                    try:
+                        with _chat_lock():
+                            if hasattr(brain, "reset"):
+                                brain.reset()
+                    except _Busy:
+                        self._json(200, {"ok": False, "err": "她正忙着"})
+                        return
                     self._json(200, {"ok": True})
+                elif path == "/api/history/clear":
+                    # 清空云上的聊天存档 + 她的内存上下文。
+                    # 桌宠/App 的"清空聊天记录"走这里 —— 存档只有云上这一份，
+                    # 以前桌宠直接调本地 Brain.clear_history()，删的是本机文件，
+                    # 云上那份一动不动，看着清了其实没清。
+                    ok = False
+                    try:
+                        from brain import Brain
+                        ok = bool(Brain.clear_history())
+                    except Exception as e:
+                        print(f"[大脑] 清空聊天存档失败：{e}", flush=True)
+                    try:
+                        with _chat_lock():
+                            if hasattr(brain, "reset"):
+                                brain.reset()
+                    except _Busy:
+                        pass
+                    self._json(200, {"ok": ok})
+                elif path == "/api/life/catchup":
+                    # 桌宠开机/手动刷新时让云上把她的生活补到当前时刻。
+                    # 会调模型，慢（几秒到几十秒），客户端放在后台线程里等。
+                    try:
+                        life = getattr(brain, "life", None)
+                        if life is None:
+                            self._json(200, {"ok": False, "events": 0,
+                                             "diary": 0, "err": "生活引擎没开"})
+                            return
+                        res = life.catch_up(force=bool(body.get("force"))) or {}
+                        self._json(200, {"ok": True,
+                                         "events": int(res.get("events") or 0),
+                                         "diary": int(res.get("diary") or 0),
+                                         "skip": res.get("skip") or ""})
+                    except Exception as e:
+                        self._json(200, {"ok": False, "events": 0, "diary": 0,
+                                         "err": str(e)[:80]})
+                elif path == "/api/diary/write":
+                    # "让她现在写篇日记"：写到云上的 journal 目录（只有那一份）
+                    try:
+                        life = getattr(brain, "life", None)
+                        ds = str(body.get("date") or "") \
+                            or time.strftime("%Y-%m-%d")
+                        txt = life.write_diary(ds) if life is not None else ""
+                        self._json(200, {"ok": bool(txt), "date": ds,
+                                         "body": txt or ""})
+                    except Exception as e:
+                        self._json(200, {"ok": False, "date": "",
+                                         "body": "", "err": str(e)[:80]})
                 elif path == "/api/reload_persona":
-                    with _LOCAL["lock"]:
-                        if hasattr(brain, "reload_persona"):
-                            brain.reload_persona()
+                    try:
+                        with _chat_lock():
+                            if hasattr(brain, "reload_persona"):
+                                brain.reload_persona()
+                    except _Busy:
+                        self._json(200, {"ok": False, "err": "她正忙着"})
+                        return
                     self._json(200, {"ok": True})
                 elif path == "/api/persona/apply":
                     # App 一键切换人设：改 config.json 的 persona_file + 热重载。
@@ -472,7 +634,7 @@ def start_remote_api(brain):
                         # 内存里的 api_config 必须同步改：reload_persona() 读的是内存的 persona_file，
                         # 只写盘不改内存的话热重载会载回旧人设，App 的"当前"标记也永远停在第一套
                         api_config["persona_file"] = cfg["persona_file"]
-                        with _LOCAL["lock"]:
+                        with _chat_lock():
                             brain.reload_persona()
                         her = ""
                         try:
@@ -883,6 +1045,17 @@ def start_remote_api(brain):
     # mobile.remote_host，继续认
     host = str(api_config.get("bind_host")
                or MOB_CFG.get("remote_host") or "127.0.0.1")
+    # 没配 token 就别往外绑：那等于开了一个谁都能用的接口（以前 _check 是空 token
+    # 全放行，忘填 token 很常见，配上 0.0.0.0 就是公网裸奔）。宁可不开这个口。
+    if not tok and not _is_loopback(host):
+        print("[大脑] 拒绝启动远程 API：bind_host=%s 但没配 brain_token。"
+              "这样会变成无鉴权的公开接口 —— 请在 config.json 里填一个"
+              "随机长串（brain_token），或改回只绑 127.0.0.1。" % host,
+              flush=True)
+        return None
+    if not tok:
+        print("[大脑] 远程 API 未配 brain_token：只接受本机回环连接"
+              "（开发模式，手机/公网连不进来）", flush=True)
     srv = http.server.ThreadingHTTPServer((host, port), _Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     print(f"[大脑] 远程大脑 API 就绪：{host}:{port}", flush=True)
@@ -906,7 +1079,7 @@ def run_server():
         start_background(_LOCAL["brain"])
 
     print("=" * 58, flush=True)
-    print(" 角色 · 云端大脑", flush=True)
+    print(" 云端大脑", flush=True)
     print(" 远程 API / 生活 / 朋友圈 / 主动搭话 照常运行。", flush=True)
     print("=" * 58, flush=True)
     try:

@@ -31,7 +31,10 @@ if BRAIN not in sys.path:
     sys.path.insert(0, BRAIN)
 
 PET_BAT = os.path.join(HERE, "pet.py")          # 桌宠：本目录
-BRAIN_PY = os.path.join(BRAIN, "server.py")   # 云端大脑服务：brain 目录
+# 注意：这里**没有**云端大脑的守护 —— 大脑在另一台机器（C:\linzhixia\app），
+# 本机看门狗够不着它，云上的存活靠计划任务/服务自己管。
+# 以前留过一个 BRAIN_PY 常量，从来没被用过，README 也因此写成"桌宠/大脑掉了
+# 都自动拉起"，是句假话，已删。
 
 try:
     import paths
@@ -160,11 +163,14 @@ def main():
 
 if __name__ == "__main__":
     # 单实例守卫：同一时间只允许一个看门狗，否则两个会抢着拉桌宠。
+    # 必须用 WinDLL(use_last_error=True) + ctypes.get_last_error()：
+    # 走 ctypes.windll 再调 kernel32.GetLastError() 的话，ctypes 自己的调用会把
+    # LastError 冲掉，拿回来的几乎总是 0，这个守卫等于没装（pet.py 里踩过同样的坑）。
     try:
         import ctypes
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         mutex = kernel32.CreateMutexW(None, False, "Global\\LinZhixiaWatchdogSingleInstance")
-        if kernel32.GetLastError() == 183:   # ERROR_ALREADY_EXISTS
+        if ctypes.get_last_error() == 183:   # ERROR_ALREADY_EXISTS
             print("[看门狗] 看门狗已在运行，本实例退出。", flush=True)
             sys.exit(0)
     except Exception:

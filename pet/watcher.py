@@ -138,7 +138,7 @@ def looks_like_game(fg):
 
 
 def guess_from_title(fg):
-    """不看画面，只从窗口标题猜他在干嘛。零开销。"""
+    """不看画面，只从窗口标题猜他在干嘛。零开销（标题本身会上云，见 :333）。"""
     title = (fg.get("title") or "").lower()
     exe = (fg.get("exe") or "").lower()
 
@@ -330,7 +330,10 @@ class ActivityWatcher:
         if self._last_game:
             self._last_game = False   # 游戏结束了
 
-        # --- 只看窗口标题猜他在干嘛（零开销、零隐私成本） ---
+        # --- 只看窗口标题猜他在干嘛（零开销；隐私见下） ---
+        # 别把这句写成"零隐私成本"：不截屏是真的（截屏那条路已整体移除，见文件头），
+        # 但前台窗口的**标题原文**会随 scene 一起发到云上，标题里常有文档名、
+        # 聊天对象、搜索词。比截屏轻得多，但不是零。
         guess = guess_from_title(fg)
         prev = self._last_fg.get("guess")
         if guess and guess != prev:

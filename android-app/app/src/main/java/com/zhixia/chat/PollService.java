@@ -51,6 +51,23 @@ public class PollService extends Service {
         return START_STICKY;
     }
 
+    /**
+     * 带鉴权的 GET。token 走 Authorization 头，不再拼进 URL ——
+     * URL 会进浏览器历史、Referer 和各级访问日志。
+     * （只有 <img>/<audio> 这类设不了头的媒体请求才继续用 ?token=，服务端两种都认。）
+     */
+    private HttpURLConnection open(String base, String path, String token)
+            throws Exception {
+        HttpURLConnection c =
+                (HttpURLConnection) new URL(base + path).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(8000);
+        if (token != null && !token.isEmpty()) {
+            c.setRequestProperty("Authorization", "Bearer " + token);
+        }
+        return c;
+    }
+
     private void pollLoop() {
         while (running) {
             try {
@@ -60,10 +77,7 @@ public class PollService extends Service {
                 String base = p.getString("base", "")
                         .replaceAll("/+$", "");
                 String token = p.getString("token", "");
-                URL u = new URL(base + "/api/history?limit=1&token=" + token);
-                HttpURLConnection c = (HttpURLConnection) u.openConnection();
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(8000);
+                HttpURLConnection c = open(base, "/api/history?limit=1", token);
                 if (c.getResponseCode() == 200) {
                     StringBuilder sb = new StringBuilder();
                     try (java.io.Reader r = new java.io.InputStreamReader(
@@ -78,10 +92,14 @@ public class PollService extends Service {
                         JSONObject last = items.getJSONObject(items.length() - 1);
                         String ts = last.optString("t", "");
                         String role = last.optString("role", "");
+                        String text = last.optString("text", "");
+                        // 游标必须带上正文：t 只精确到分钟，同一分钟内来的第二条
+                        // 会被当成"这条已经通知过"而整个漏掉（她连发两条时很常见）
+                        String cur = ts + "\n" + text;
                         String seen = p.getString("last_seen_t", "");
-                        if ("assistant".equals(role) && !ts.equals(seen)) {
-                            p.edit().putString("last_seen_t", ts).apply();
-                            notifyMsg(last.optString("text", "有新消息"));
+                        if ("assistant".equals(role) && !cur.equals(seen)) {
+                            p.edit().putString("last_seen_t", cur).apply();
+                            notifyMsg(text.isEmpty() ? "有新消息" : text);
                         }
                     }
                 }
@@ -89,10 +107,7 @@ public class PollService extends Service {
 
                 // 内置更新检查：服务器上有更新版就通知一次
                 int installedCode = 21;   // 跟着 APK 版本走，每次发版改这里（与 chat.html APP_CODE 一致）
-                URL vu = new URL(base + "/api/app/version?token=" + token);
-                HttpURLConnection vc = (HttpURLConnection) vu.openConnection();
-                vc.setConnectTimeout(8000);
-                vc.setReadTimeout(8000);
+                HttpURLConnection vc = open(base, "/api/app/version", token);
                 if (vc.getResponseCode() == 200) {
                     StringBuilder sb = new StringBuilder();
                     try (java.io.Reader r = new java.io.InputStreamReader(
@@ -122,8 +137,12 @@ public class PollService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHAN)
                 : new Notification.Builder(this);
+        // 通知标题用人设名（页面启动时通过 Android.saveWho 同步过来），不写死角色名
+        String who = android.content.SharedPreferences
+                .getSharedPreferences("zx", MODE_PRIVATE)
+                .getString("who", "").trim();
         b.setSmallIcon(android.R.drawable.stat_notify_chat)
-         .setContentTitle("角色")
+         .setContentTitle(who.isEmpty() ? "新消息" : who)
          .setContentText(text.length() > 60 ? text.substring(0, 60) + "…" : text)
          .setAutoCancel(true);
         android.content.Intent i = new android.content.Intent(this, MainActivity.class);

@@ -58,7 +58,9 @@ class RemoteBrain:
         self.model = None
         self.tok = None
         self.life = None
-        self.persona = {"name": "角色"}
+        # 人设名从云端拉，拉不到就用角色自己的名字（见 /api/persona）。
+        # 不写死任何角色名 —— 换了人设这里不用改。
+        self.persona = {"name": ""}
         try:
             d = self._get("/api/persona")
             if d.get("name"):
@@ -90,6 +92,23 @@ class RemoteBrain:
         with opener.open(urllib.request.Request(url), timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
 
+    def _post(self, path, payload, timeout=90):
+        """POST 一份 JSON 到云上（鉴权走 Authorization 头，不再拼进 URL）。
+
+        URL 里的 token 会进各级访问日志和 Referer；媒体 URL（<img>/<audio>）
+        没法带头，那些还保留 ?token=，服务端两种都认。
+        """
+        url = self.base + path
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + self.token},
+            method="POST")
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+
     # --- pet.py 用到的 Brain 接口 ---
     def chat(self, q, img=None):
         """img 必须留着 —— pet.py 与 App 两条通道都会无条件 `brain.chat(text, img=img)`
@@ -114,6 +133,32 @@ class RemoteBrain:
     def seed_history(self):
         return 0        # 聊天记录在云上，本地不用灌
 
+    def read_history(self, limit=40):
+        """读云上的聊天存档（pet.py 启动时灌回聊天窗用）。
+
+        Brain.read_history 是本地时代的接口，远程大脑上原本没有这个方法 ——
+        pet.py 直接调 self.pet.brain.read_history()，AttributeError 被 except 吞掉，
+        于是每次启动聊天窗都是空的，看着像"她重启后忘了刚才聊的"。
+        存档只有云上那一份，走 /api/history。
+        """
+        try:
+            d = self._get("/api/history?limit=%d" % int(limit or 40))
+            return d.get("items") or []
+        except Exception:
+            return []
+
+    def clear_history(self):
+        """清空云上的聊天存档（语义和本地 Brain.clear_history 对齐）。
+
+        远程模式下必须打到云上：本地 Brain.clear_history() 删的是**本机**文件，
+        云上那份一动不动 —— 看着清了其实没清。
+        """
+        try:
+            d = self._post("/api/history/clear", {})
+            return bool(d.get("ok"))
+        except Exception:
+            return False
+
     def reset(self):
         try:
             self._post("/api/reset", {})
@@ -128,10 +173,12 @@ class RemoteBrain:
 
 
 class RemoteLife:
-    """只读的"她的生活"远程视图 —— 给日记窗口用。
+    """她的生活的远程视图 —— 给日记窗口和后台补算用。
 
-    生活只有云上那一份在过：list_diaries / read_diary 从云上取，catch_up / write_diary
-    是空操作（本地不写，避免分叉）。接口和 life_engine.LifeEngine 对齐。
+    生活只有云上那一份在过，所以四个方法全打到云上：
+    list_diaries / read_diary 读，catch_up / write_diary 写。
+    以前后两个是**空操作**，于是 LifeWorker 每次开机都空转一趟、
+    托盘里的"让她现在写篇日记"永远只会报失败。接口和 life_engine.LifeEngine 对齐。
     """
 
     def __init__(self, base, token=""):
@@ -140,11 +187,22 @@ class RemoteLife:
 
     def _get(self, path, timeout=15):
         url = self.base + path
-        if self.token:
-            sep = "&" if "?" in url else "?"
-            url += sep + "token=" + urllib.parse.quote(self.token)
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(urllib.request.Request(url), timeout=timeout) as r:
+        req = urllib.request.Request(
+            url, headers={"Authorization": "Bearer " + self.token})
+        with opener.open(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    def _post(self, path, payload, timeout=180):
+        url = self.base + path
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + self.token},
+            method="POST")
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
 
     # --- DiaryDialog 用 ---
@@ -163,9 +221,24 @@ class RemoteLife:
         except Exception:
             return ""
 
-    # --- pet.py 会调到的（远程模式下都是空操作） ---
+    # --- pet.py 会调到的 ---
     def catch_up(self, force=False):
-        return {}
+        """让云上把她的生活补到当前时刻（会调模型，可能几十秒，超时给到 180s）。"""
+        try:
+            d = self._post("/api/life/catchup", {"force": bool(force)}) or {}
+            if not d.get("ok"):
+                return {}
+            return {"events": int(d.get("events") or 0),
+                    "diary": int(d.get("diary") or 0),
+                    "skip": d.get("skip") or ""}
+        except Exception:
+            return {}
 
     def write_diary(self, date_str):
-        return ""
+        """让云上给她写某天的日记，返回正文（失败返回 ""）。"""
+        try:
+            d = self._post("/api/diary/write",
+                           {"date": str(date_str or "")}) or {}
+            return d.get("body") or ""
+        except Exception:
+            return ""

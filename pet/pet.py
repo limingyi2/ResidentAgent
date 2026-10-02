@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""角色 · 桌面立绘（纯客户端）
+"""桌面立绘（纯客户端）
 
 她是**薄客户端**：只有立绘、气泡、聊天窗，没有任何本地模型、没有本地 HTTP 服务、
 也不在本地存记忆 —— 脑子（记忆 / 人设 / 生活 / 日记）只有云上一份，走 SSH 隧道连过去。
@@ -170,7 +170,7 @@ class ActSignal(QObject):
 
 
 class ProactiveWorker(QThread):
-    """让角色针对当前场景主动说一句（走 API，不能卡住界面）"""
+    """让她针对当前场景主动说一句（走 API，不能卡住界面）"""
     reply = pyqtSignal(str, str)
 
     def __init__(self, brain, scene):
@@ -510,7 +510,15 @@ class ChatDialog(QDialog):
         super().__init__()
         self.pet = pet
         self._last_ts = 0.0
-        self.setWindowTitle("角色")
+        # 标题取人设名（云端 /api/persona 拉回来的），拉不到就用通用名。
+        # 不写死角色名 —— 换人设不用改代码。
+        who = ""
+        try:
+            who = str((getattr(pet, "brain", None) or {}).persona.get("name") or "").strip()
+        except Exception:
+            who = ""
+        self._who = who
+        self.setWindowTitle(who or "聊天")
         self.setFixedSize(DIALOG_W, DIALOG_H)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -520,7 +528,7 @@ class ChatDialog(QDialog):
         root.setContentsMargins(1, 1, 1, 1)     # 留 1px 给描边
         root.setSpacing(0)
 
-        self.title = TitleBar(self, "角色")
+        self.title = TitleBar(self, self._who or "聊天")
         root.addWidget(self.title)
 
         # —— 消息区 ——
@@ -583,7 +591,10 @@ class ChatDialog(QDialog):
         # 有聊天存档就把记录填回来（重启桌宠后还能接着看），没有才让她先开口
         try:
             past = self.pet.brain.read_history(40)
-        except Exception:
+        except Exception as e:
+            # 以前这里静默吞掉：read_history 在 RemoteBrain 上不存在，属性错误
+            # 被吃成 past=[]，表现是"每次启动聊天窗都空的"，查起来毫无线索
+            print(f"[桌宠] 读聊天存档失败（聊天窗会是空的）：{e}", flush=True)
             past = []
         self.restore(past)
 
@@ -821,24 +832,24 @@ class PetWindow(QLabel):
                    or (api_config.get("mobile") or {}).get("token") or "")
         self.mem = None
         self.brain = RemoteBrain({"base": self._remote_base, "token": _tok})
-        # 生活/日记是"只读远程视图"：日记窗口能看云上的日记，
-        # 本地不写任何东西（catch_up/write_diary 都是空操作）
+        # 生活/日记的远程视图：都打到云上（读日记 / 触发补算 / 让她现在写日记），
+        # 本地不落任何数据 —— 生活只有云上那一份在过，两边写就会分叉
         self.life = RemoteLife(self._remote_base, _tok)
         self.ready = True
-        print(f"[角色] 远程大脑模式：{self._remote_base}"
+        print(f"[桌宠] 远程大脑模式：{self._remote_base}"
               "（记忆在云上，本地只显示）", flush=True)
 
         # 重启后把聊天记录灌回上下文 —— 她还记得刚才聊到哪儿，不会一上来就"初次见面"
         try:
             n = self.brain.seed_history()
             if n:
-                print(f"[角色] 接上了上次的聊天记录（{n} 条）", flush=True)
+                print(f"[桌宠] 接上了上次的聊天记录（{n} 条）", flush=True)
         except Exception as e:
-            print(f"[角色] 聊天记录没读回来（不影响聊天）：{e}", flush=True)
+            print(f"[桌宠] 聊天记录没读回来（不影响聊天）：{e}", flush=True)
 
         # 立绘先显示，不等任何模型 —— 说话一律走 API
         self._load_pixmaps()
-        print(f"[角色] 立绘已显示，大脑在 {self._remote_base}"
+        print(f"[桌宠] 立绘已显示，大脑在 {self._remote_base}"
               "（云端连不上她就说不了话，检查 SSH 隧道）", flush=True)
 
         # --- 活动感知（只看窗口标题/进程名，不截屏） ---
@@ -942,10 +953,10 @@ class PetWindow(QLabel):
                 on_game=lambda d: self._act_sig.game.emit(d),
             )
             self.watcher.start()
-            print("[角色] 活动感知已启动：轻量模式（只看窗口标题 / 进程名，不截屏）",
+            print("[桌宠] 活动感知已启动：轻量模式（只看窗口标题 / 进程名，不截屏）",
                   flush=True)
         except Exception as e:
-            print(f"[角色] 活动感知没起来（不影响聊天）：{e}", flush=True)
+            print(f"[桌宠] 活动感知没起来（不影响聊天）：{e}", flush=True)
 
         # 表情包素材库：后台线程慢慢给没描述的图补标签（手动丢进
         # data/stickers/ 的图会在这里被她"看"一遍，之后她才知道每张是什么）
@@ -1014,7 +1025,7 @@ class PetWindow(QLabel):
                         ("talk", os.path.join(ASSETS_DIR, "zhixia_talk.png"))]:
             pm = QPixmap(path)
             if pm.isNull():
-                print(f"[角色] 立绘读不到：{path}", flush=True)
+                print(f"[桌宠] 立绘读不到：{path}", flush=True)
                 continue
             self.pix[k] = pm.scaledToHeight(H, Qt.TransformationMode.SmoothTransformation)
         if not self.pix:
@@ -1199,17 +1210,23 @@ class PetWindow(QLabel):
             QMessageBox.StandardButton.No)
         if r != QMessageBox.StandardButton.Yes:
             return
-        from brain import Brain
-        Brain.clear_history()
+        try:
+            # 远程模式下打云上的 /api/history/clear：存档只有云上那一份。
+            # 以前是 from brain import Brain; Brain.clear_history() —— 删的是**本机**
+            # 文件，云上那份一动不动，而且文件不存在时 OSError 还会逃出去，
+            # 连带把下面的 dlg.clear_all() 一起跳过（界面看着根本没清）。
+            self.brain.clear_history()
+        except Exception as e:
+            print("[桌宠] 清空云上聊天存档失败：", e, flush=True)
         try:
             self.brain.reset()
         except Exception as e:
-            print("[角色] 清上下文失败：", e, flush=True)
+            print("[桌宠] 清上下文失败：", e, flush=True)
         dlg = getattr(self, "dlg", None)
         if dlg is not None:
             dlg.clear_all()
         self.show_bubble("好，刚才聊的都忘掉啦～")
-        print("[角色] 聊天记录已清空", flush=True)
+        print("[桌宠] 聊天记录已清空", flush=True)
 
     # --- 窗口层级：置顶 / 全屏时让位 ---
     @staticmethod
@@ -1316,17 +1333,17 @@ class PetWindow(QLabel):
                 _TOPMOST_GUARD = _TopMostGuard()
                 QApplication.instance().installNativeEventFilter(_TOPMOST_GUARD)
             _TOPMOST_GUARD.enable(self)
-            print("[角色] 置顶保活已开：原生钩子 + 每 %d 毫秒抢回一次"
+            print("[桌宠] 置顶保活已开：原生钩子 + 每 %d 毫秒抢回一次"
                   % _TOPMOST_INTERVAL_MS, flush=True)
         except Exception as e:
-            print(f"[角色] 置顶原生钩子没挂上（还有定期保活兜底）：{e}", flush=True)
+            print(f"[桌宠] 置顶原生钩子没挂上（还有定期保活兜底）：{e}", flush=True)
         try:
             self._topmost_timer = QTimer(self)
             self._topmost_timer.setInterval(_TOPMOST_INTERVAL_MS)
             self._topmost_timer.timeout.connect(self.enforce_topmost)
             self._topmost_timer.start()
         except Exception as e:
-            print(f"[角色] 置顶定时器没起来：{e}", flush=True)
+            print(f"[桌宠] 置顶定时器没起来：{e}", flush=True)
         self.enforce_topmost()
 
     def set_win_level(self, level, persist=True):
@@ -1337,7 +1354,7 @@ class PetWindow(QLabel):
         self._apply_level(level)
         if persist:
             self.save_window_cfg()
-        print(f"[角色] 窗口层级：{WIN_LEVEL_LABEL[level]}", flush=True)
+        print(f"[桌宠] 窗口层级：{WIN_LEVEL_LABEL[level]}", flush=True)
 
     def set_sink_on_fullscreen(self, v, persist=True):
         """全屏 / 打游戏时要不要自动让开（默认关 —— 用户要手动控，不要她自己判断）。"""
@@ -1369,17 +1386,17 @@ class PetWindow(QLabel):
         if not self.sink_on_fullscreen:
             if blocking:
                 why = "打游戏" if playing else "全屏"
-                print(f"[角色] 你在{why}，按你选的层级不动（{WIN_LEVEL_LABEL[self.win_level]}）",
+                print(f"[桌宠] 你在{why}，按你选的层级不动（{WIN_LEVEL_LABEL[self.win_level]}）",
                       flush=True)
             return
         why = "打游戏" if playing else ("全屏" if fullscreen else "")
         if blocking:
             if self._level != "bottom":
-                print(f"[角色] 你在{why}，我先躲到后面"
+                print(f"[桌宠] 你在{why}，我先躲到后面"
                       f"（不想要这行为就在右键菜单里关掉「全屏时自动让开」）", flush=True)
                 self._apply_level("bottom")
         elif self._level != self.win_level:
-            print(f"[角色] 退出来了，我回到「{WIN_LEVEL_LABEL[self.win_level]}」", flush=True)
+            print(f"[桌宠] 退出来了，我回到「{WIN_LEVEL_LABEL[self.win_level]}」", flush=True)
             self._apply_level(self.win_level)
 
     # --- 设置 ---
@@ -1504,7 +1521,7 @@ if __name__ == "__main__":
                 "请在 brain\\config\\config.json 里填：\n"
                 "  \"brain_remote\": \"http://127.0.0.1:18787\"\n"
                 "并确认 SSH 隧道是通的（双击 run_pet.bat 会自动建）。",
-                "角色 · 起不来", 0)
+                "桌宠 · 起不来", 0)
         except Exception:
             pass
         sys.exit(1)
