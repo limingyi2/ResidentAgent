@@ -552,7 +552,11 @@ function switchTab(t) {
   $('tabbar').style.display = 'flex';
   document.body.classList.remove('notab');
 }
+// 当前挂着的自绘弹层（遮罩）。全局只允许存在一个，见 newSheet 的说明。
+let curSheet = null;
 function androidBack() {
+  // 弹层优先：它是浮在最上面的，不先关掉的话按返回键看着像"没反应"
+  if (curSheet) { closeSheet(); return 'true'; }
   if ($('viewer').style.display === 'flex') { $('viewer').style.display = 'none'; return 'true'; }
   if ($('updDlg').style.display === 'flex') { $('updDlg').style.display = 'none'; return 'true'; }
   if ($('stkPanel').style.display === 'flex') { $('stkPanel').style.display = 'none'; return 'true'; }
@@ -785,25 +789,61 @@ function markSaved(name, on) {
   localStorage.setItem('zx_saved', JSON.stringify(a));
 }
 function addLongPress(el, fn) {
-  let tmr = null;
-  el.addEventListener('touchstart', () => { tmr = setTimeout(fn, 550); }, { passive: true });
-  el.addEventListener('touchend', () => clearTimeout(tmr));
-  el.addEventListener('touchmove', () => clearTimeout(tmr));
-  el.addEventListener('contextmenu', (e) => { e.preventDefault(); fn(); });
+  // 长按**只会弹一次**。
+  // 以前 touchstart 定时器(550ms) 和 contextmenu 各调一次 fn，而 Android WebView
+  // 长按图片两个事件都会来 → fn 跑两遍 → body 上叠了两层全屏遮罩，
+  // 上面那层关掉、底下那层原地不动，于是"弹层关不掉、点哪都没反应"
+  // （返回主菜单也没用，遮罩挂在 body 上，照样盖住整个 App）。
+  // 所以用 fired 记住本次手势已经触发过；长按后浏览器还会补一个 click，
+  // 顺手一起吞掉，否则会连着触发 onclick。
+  let tmr = null, fired = false;
+  el.addEventListener('touchstart', () => {
+    fired = false;
+    tmr = setTimeout(() => { fired = true; fn(); }, 550);
+  }, { passive: true });
+  el.addEventListener('touchend', () => { clearTimeout(tmr); });
+  el.addEventListener('touchmove', () => { clearTimeout(tmr); });
+  el.addEventListener('touchcancel', () => { clearTimeout(tmr); });
+  el.addEventListener('click', (e) => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (fired) { fired = false; return; }
+    fired = true;
+    clearTimeout(tmr);
+    fn();
+  });
 }
-function imgMenu(name, src) {
-  const saved = savedImgs().indexOf(name) >= 0;
+/* --- 底部弹层 ---
+   以前每个弹层各自 createElement 遮罩，谁也不认识谁。万一同一次操作建出两个
+   （长按事件重复、或用户连点），两层都是 position:fixed;inset:0 的全屏遮罩，
+   点"取消"只关掉最上面那层，底下那层原地不动 —— 表现就是"弹层关不掉、
+   整个 App 点哪都没反应"，按返回键回主菜单也没用（遮罩挂在 body 上）。
+   现在全局只允许存在一个：开新的先关旧的，返回键也先关弹层。 */
+function closeSheet() {
+  if (curSheet) { try { curSheet.remove(); } catch (e) {} curSheet = null; }
+}
+function newSheet(align) {
+  closeSheet();
   const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-end;';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:' + (align || 'flex-end') + ';';
   const sheet = document.createElement('div');
   sheet.style.cssText = 'background:#fff;border-radius:14px 14px 0 0;width:100%;padding:6px 0 16px;';
   function act(label, color, fn) {
     const b = document.createElement('div');
     b.style.cssText = 'padding:14px;text-align:center;font-size:15.5px;color:' + color + ';border-bottom:1px solid #f2f2f2;';
     b.textContent = label;
-    b.onclick = () => { ov.remove(); if (fn) fn(); };
+    b.onclick = () => { closeSheet(); if (fn) fn(); };
     sheet.appendChild(b);
   }
+  ov.appendChild(sheet);
+  ov.onclick = (e) => { if (e.target === ov) closeSheet(); };
+  curSheet = ov;
+  document.body.appendChild(ov);
+  return act;
+}
+function imgMenu(name, src) {
+  const saved = savedImgs().indexOf(name) >= 0;
+  const act = newSheet('flex-end');
   act('加入我的表情包', '#191919', async () => {
     try {
       const r = await fetch(src);
@@ -833,9 +873,6 @@ function imgMenu(name, src) {
     }
   });
   act('取消', '#888', null);
-  ov.appendChild(sheet);
-  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
-  document.body.appendChild(ov);
 }
 function keyOf(it) {
   return (it.t || '') + '|' + (it.role || '') + '|' + (it.text || '') + '|' + (it.img || '');
@@ -1046,36 +1083,13 @@ function renderStickers() {
 function stkMenu(label, onDel) {
   // 长按表情包：底部弹层确认删除。原生 confirm() 在 WebView 里可能弹不出来，
   // 整个界面点哪都没反应（假死），统一用自绘弹层
-  const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-end;';
-  const sheet = document.createElement('div');
-  sheet.style.cssText = 'background:#fff;border-radius:14px 14px 0 0;width:100%;padding:6px 0 16px;';
-  function act(label2, color, fn) {
-    const b = document.createElement('div');
-    b.style.cssText = 'padding:14px;text-align:center;font-size:15.5px;color:' + color + ';border-bottom:1px solid #f2f2f2;';
-    b.textContent = label2;
-    b.onclick = () => { ov.remove(); if (fn) fn(); };
-    sheet.appendChild(b);
-  }
+  const act = newSheet('flex-end');
   act('删除' + label, '#fa5151', onDel);
   act('取消', '#888', null);
-  ov.appendChild(sheet);
-  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
-  document.body.appendChild(ov);
 }
 function sendSticker(b64) {
   // 点一下就发会误触，先弹自绘确认层拦一道（不用原生 confirm，会假死）
-  const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-end;';
-  const sheet = document.createElement('div');
-  sheet.style.cssText = 'background:#fff;border-radius:14px 14px 0 0;width:100%;padding:6px 0 16px;';
-  function act(label, color, fn) {
-    const b = document.createElement('div');
-    b.style.cssText = 'padding:14px;text-align:center;font-size:15.5px;color:' + color + ';border-bottom:1px solid #f2f2f2;';
-    b.textContent = label;
-    b.onclick = () => { ov.remove(); if (fn) fn(); };
-    sheet.appendChild(b);
-  }
+  const act = newSheet('flex-end');
   act('把这张表情包发给她？', '#191919', null);
   act('发送', '#07c160', () => {
     $('stkPanel').style.display = 'none';
@@ -1083,9 +1097,6 @@ function sendSticker(b64) {
     sendText('', b64);
   });
   act('取消', '#888', null);
-  ov.appendChild(sheet);
-  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
-  document.body.appendChild(ov);
 }
 
 /* --- 快递管理 --- */
@@ -1156,8 +1167,11 @@ async function loadPackages() {
   }
 }
 function pkgEditNote(p) {
+  // 居中弹窗，形状和 newSheet 不同，但同样受"全局只允许一个"管
+  closeSheet();
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;';
+  curSheet = ov;
   const dlg = document.createElement('div');
   dlg.style.cssText = 'background:#fff;border-radius:12px;width:280px;padding:16px;';
   dlg.innerHTML = '<div style="font-size:15px;font-weight:500;margin-bottom:10px">备注「' + esc(p.number) + '」</div>';
@@ -1170,7 +1184,7 @@ function pkgEditNote(p) {
   const cancel = document.createElement('button');
   cancel.textContent = '取消';
   cancel.style.cssText = 'border:none;background:#f2f2f2;color:#191919;border-radius:6px;padding:8px 14px;font-size:13.5px';
-  cancel.onclick = () => ov.remove();
+  cancel.onclick = () => closeSheet();
   const ok = document.createElement('button');
   ok.textContent = '保存';
   ok.style.cssText = 'border:none;background:#07c160;color:#fff;border-radius:6px;padding:8px 14px;font-size:13.5px';
@@ -1181,12 +1195,12 @@ function pkgEditNote(p) {
         body: JSON.stringify({ number: p.number, note: inp.value.trim() })
       });
     } catch (e) {}
-    ov.remove(); loadPackages();
+    closeSheet(); loadPackages();
   };
   row.appendChild(cancel); row.appendChild(ok);
   dlg.appendChild(inp); dlg.appendChild(row);
   ov.appendChild(dlg);
-  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.onclick = (e) => { if (e.target === ov) closeSheet(); };
   document.body.appendChild(ov);
   setTimeout(() => inp.focus(), 50);
 }

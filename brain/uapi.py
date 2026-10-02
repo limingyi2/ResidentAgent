@@ -7,6 +7,7 @@
 认证是 query 参数 ?token=（实测 header Bearer 不认）。
 """
 import json
+import time
 import urllib.parse
 import urllib.request
 
@@ -78,18 +79,31 @@ def fetch_ip_city(ip, token):
         return None
 
 
-def fetch_random_image(category, token, timeout=15):
+def fetch_random_image(category, token, timeout=8):
     """随机图片：接口直接回图片二进制（302 到图床后返回 image/*）。
-    成功返回 bytes，失败/返回的不是图返回 None。超时给足 —— 风景/二次元
-    图一张几百 KB 到 2MB，云机 1Mbps 出网，8 秒会临界。"""
+    成功返回 bytes，失败/返回的不是图返回 None。
+
+    **超时给 8 秒而不是更久**：实测这个接口约 25% 概率把连接挂死 —— 表现是
+    一次数据都收不到、耗满整个 timeout 才抛；而成功的请求只要 0.2~0.4 秒。
+    给 15 秒并不会让更多图拉下来，只会让每次失败多白等 7 秒（聊天主链路在等）。
+
+    **必须重试**：只打一次的话，"她偶尔不发表情包"就是这个 —— 模型明明写了
+    [rand:bq]，拉图失败后标签被清掉，她那边就成了"啥也没发"，他还以为她不想发。
+    两次机会 + 间隔 0.4 秒（照 _get 的经验：背靠背重发立刻就能成）。
+    最坏耗时 8×2+0.4 ≈ 16.4 秒，换来约 25% → 约 6% 的失败率。
+    """
     url = _BASE + "/random/image?" + urllib.parse.urlencode({"category": category})
     req = urllib.request.Request(url + "&token=" + urllib.parse.quote(token))
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            ctype = str(r.headers.get("Content-Type") or "")
-            data = r.read()
-        if data and ctype.startswith("image/"):
-            return data
-    except Exception:
-        pass
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                ctype = str(r.headers.get("Content-Type") or "")
+                data = r.read()
+            if data and ctype.startswith("image/"):
+                return data
+            break        # 回来了但不是图（被限流/返回 JSON），重发也一样
+        except Exception:
+            if attempt == 0:
+                time.sleep(0.4)   # 第一次挂死，立刻再打一次
+                continue
     return None

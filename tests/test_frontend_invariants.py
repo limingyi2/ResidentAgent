@@ -82,5 +82,66 @@ class TestFrontendInvariants(unittest.TestCase):
                 f.read()
 
 
+class TestSheetLayers(unittest.TestCase):
+    """自绘弹层：全局只允许存在一个，且必须能被关掉。
+
+    踩过的坑：长按表情包时 Android WebView 会**同时**发 touchstart(550ms 定时器)
+    与 contextmenu，两者都调了弹层函数 → body 上叠两层 position:fixed 遮罩 →
+    点"取消"只关掉最上面那层，底下那层原地不动 → 整个 App 点哪都没反应，
+    按返回键回主菜单也没用（遮罩挂在 body 上）。
+    """
+
+    def test_sheet_registry_exists(self):
+        src = _src()
+        self.assertIn("let curSheet", src, "缺全局弹层引用，新弹层会盖住旧的")
+        self.assertIn("function closeSheet", src)
+        self.assertIn("function newSheet", src)
+
+    def test_every_sheet_goes_through_the_registry(self):
+        """所有建遮罩的地方都必须走 newSheet/closeSheet，不能自己 createElement。
+
+        这是防复发的关键：以前四处各建各的，谁也不认识谁，重复触发就叠层。
+        """
+        src = _src()
+        # 遮罩那个固定 cssText 只该在 newSheet / pkgEditNote 里出现
+        hits = [m.start() for m in re.finditer(r"position:fixed;inset:0;background:rgba", src)]
+        self.assertLessEqual(
+            len(hits), 2,
+            "出现了第 %d 处各自建遮罩 —— 必须统一走 newSheet/closeSheet，"
+            "否则重复触发又会叠层" % len(hits))
+
+    def test_back_button_closes_the_sheet_first(self):
+        """返回键必须先关弹层 —— 万一还有漏网的遮罩，这是唯一出路。"""
+        src = _src()
+        m = re.search(r"function androidBack\(\)\s*\{(.*?)\n\}", src, re.S)
+        self.assertIsNotNone(m, "找不到 androidBack")
+        body = m.group(1)
+        self.assertIn("curSheet", body)
+        self.assertLess(body.index("curSheet"), body.index("viewer"),
+                        "弹层要先于其他浮层关闭（它浮在最上面）")
+
+    def test_long_press_fires_only_once(self):
+        """长按必须只触发一次回调。
+
+        touchstart 定时器与 contextmenu 都会到，缺了去重就会弹两层。
+        """
+        src = _src()
+        m = re.search(r"function addLongPress\(el, fn\)\s*\{(.*?)\n\}", src, re.S)
+        self.assertIsNotNone(m, "找不到 addLongPress")
+        body = m.group(1)
+        self.assertIn("fired", body, "长按没有去重标志 —— 长按一次会弹两个弹层")
+        self.assertIn("touchcancel", body, "漏了 touchcancel，手指被系统打断时定时器不会清")
+
+    def test_no_leftover_direct_overlay_removal(self):
+        """弹层内部的按钮不该再直接 ov.remove()，要统一走 closeSheet()。
+
+        直接 remove 的话 curSheet 还指着那个已摘掉的节点，
+        返回键会以为还有弹层、closeSheet 去摘一个已经不在的节点（空转，表现为按键无效）。
+        """
+        src = _src()
+        self.assertNotIn("ov.remove()", src,
+                         "还有地方直接 ov.remove()，统一改成 closeSheet()")
+
+
 if __name__ == "__main__":
     unittest.main()
