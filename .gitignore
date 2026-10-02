@@ -130,3 +130,6 @@ _smoke*
 tools/persync.py
 # persync 传输用的临时 payload（每次 push 覆写）
 deploy/_persync_payload.b64
+
+# APK 发布脚本：里面有真实云机路径与 SSH 配置，跟 persync 同理不入公开仓库
+tools/publish_apk.py

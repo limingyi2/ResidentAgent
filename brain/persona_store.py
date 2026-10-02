@@ -88,7 +88,7 @@ DEFAULT_RELATION = "friend"
 # 保存人设时只保留 FIELDS 白名单字段，写在 notes 里的会被覆盖。
 # 覆盖通道：聊天草稿、朋友圈、主动搭话。生图用的是 persona["appearance"]，
 # 改这段不影响长相。
-# 注意这里**不再包含关系段** —— 它由 config.json 的 relation 决定，见 RELATIONS。
+# 这里不再包含关系段 —— 它由 config.json 的 relation 决定，见 RELATIONS。
 # ============================================================================
 CORE_RULES = (
     "\n\n"

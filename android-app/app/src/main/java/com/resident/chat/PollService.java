@@ -106,7 +106,7 @@ public class PollService extends Service {
                 c.disconnect();
 
                 // 内置更新检查：服务器上有更新版就通知一次
-                int installedCode = 21;   // 跟着 APK 版本走，每次发版改这里（与 chat.html APP_CODE 一致）
+                int installedCode = 22;   // 跟着 APK 版本走，每次发版改这里（与 chat.html APP_CODE 一致）
                 HttpURLConnection vc = open(base, "/api/app/version", token);
                 if (vc.getResponseCode() == 200) {
                     StringBuilder sb = new StringBuilder();
