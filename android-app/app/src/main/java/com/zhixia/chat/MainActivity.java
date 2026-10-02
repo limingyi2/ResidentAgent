@@ -199,7 +199,7 @@ public class MainActivity extends Activity {
                 try {
                     android.app.DownloadManager.Request req =
                             new android.app.DownloadManager.Request(Uri.parse(url));
-                    req.setTitle("角色 新版本");
+                    req.setTitle("新版本");
                     req.setDescription("下载完成后点通知安装");
                     req.setMimeType("application/vnd.android.package-archive");
                     req.setNotificationVisibility(
@@ -271,7 +271,7 @@ public class MainActivity extends Activity {
                 try {
                     Intent i = new Intent(Intent.ACTION_SEND);
                     i.setType("text/plain");
-                    i.putExtra(Intent.EXTRA_SUBJECT, "角色 错误日志");
+                    i.putExtra(Intent.EXTRA_SUBJECT, "错误日志");
                     i.putExtra(Intent.EXTRA_TEXT, (text == null) ? "" : text);
                     startActivity(Intent.createChooser(i, "把日志发给…"));
                 } catch (Exception e) {
@@ -280,7 +280,7 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        /** 表情包/图片保存：存进相册「角色」目录。图片字节由页面传 base64 过来。
+        /** 表情包/图片保存：存进相册「聊天图片」目录。图片字节由页面传 base64 过来。
          * Android 10+ 走 MediaStore 免权限；老机器退到 App 私有目录。 */
         @JavascriptInterface
         public void saveImage(String name, String b64) {
@@ -294,7 +294,7 @@ public class MainActivity extends Activity {
                     android.content.ContentValues cv = new android.content.ContentValues();
                     cv.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, n);
                     cv.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-                    cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/角色");
+                    cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/聊天图片");
                     cv.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
                     Uri uri = getContentResolver().insert(
                             android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
@@ -307,7 +307,7 @@ public class MainActivity extends Activity {
                     cv.clear();
                     cv.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
                     getContentResolver().update(uri, cv, null, null);
-                    msg = "已保存到相册「角色」";
+                    msg = "已保存到相册「聊天图片」";
                 } else {
                     File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
                     if (dir != null && !dir.exists()) dir.mkdirs();
@@ -338,7 +338,7 @@ public class MainActivity extends Activity {
                             + "=? AND " + android.provider.MediaStore.Images.Media.RELATIVE_PATH + "=?";
                     int k = getContentResolver().delete(
                             android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            sel, new String[]{n, "Pictures/角色/"});
+                            sel, new String[]{n, "Pictures/聊天图片/"});
                     msg = k > 0 ? "已删除：" + n : "相册里没找到这张（可能已经删了）";
                 } else {
                     File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);

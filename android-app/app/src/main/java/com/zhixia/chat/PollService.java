@@ -30,7 +30,7 @@ public class PollService extends Service {
                 ? new Notification.Builder(this, CHAN)
                 : new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.stat_notify_chat)
-         .setContentTitle("角色")
+         .setContentTitle("守护中")
          .setContentText("正在守护你们的聊天")
          .setOngoing(true);
         if (Build.VERSION.SDK_INT >= 26) {
@@ -161,7 +161,7 @@ public class PollService extends Service {
                 ? new Notification.Builder(this, CHAN)
                 : new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.stat_sys_download_done)
-         .setContentTitle("角色有新版本")
+         .setContentTitle("有新版本")
          .setContentText("打开 App 会自动下载安装")
          .setAutoCancel(true);
         android.content.Intent i = new android.content.Intent(this, MainActivity.class);
