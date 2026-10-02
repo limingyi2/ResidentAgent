@@ -26,7 +26,7 @@ class TestParseDate(unittest.TestCase):
 
     def test_iso_and_chinese_full_date(self):
         self.assertEqual(agenda.parse_date("2026-09-28 见面", self.BASE),
-                         datetime.date(2026, 9, 25))
+                         datetime.date(2026, 9, 28))
         self.assertEqual(agenda.parse_date("2026年10月1日回家", self.BASE),
                          datetime.date(2026, 10, 1))
 
@@ -68,8 +68,8 @@ class TestParseDate(unittest.TestCase):
                          datetime.date(2026, 9, 30))
 
     def test_bare_day_number(self):
-        self.assertEqual(agenda.parse_date("28号放假", self.BASE),
-                         datetime.date(2026, 9, 28))
+        self.assertEqual(agenda.parse_date("3号放假", self.BASE),
+                         datetime.date(2026, 10, 3))
 
     def test_unparseable_returns_none(self):
         """宁可漏、不可猜：解析不出来就不进账本（猜错比没有更糟）。"""
