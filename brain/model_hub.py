@@ -219,13 +219,39 @@ def public_current(cfg):
     为什么要脱敏：这个响应走明文 HTTP，而且 App 收到后会把它**填进一个
     普通 input**（chat.html 的 loadModelCfg）。密钥是账号级凭据，明文过公网
     等于任何人抓到一次包或看到一次屏幕就能拿去刷额度。
-    前端提交时 api_key 留空 = 沿用当前（apply_cfg 里 `if key and ...`），
-    所以不预填不影响正常改设置。
+
+    顺带加一个 api_key_set：前端靠它知道"已经有一把了"，不用看见密钥本身
+    就能显示状态。原来的做法是把打码串塞进 placeholder，那等于把脱敏串
+    摆在输入框里 —— 谁手一抖复制了重贴回去，真 key 就被覆盖了（见 apply_cfg）。
     """
     d = current(cfg)
     k = d.get("api_key") or ""
-    d["api_key"] = ("%s…%s" % (k[:6], k[-4:])) if len(k) > 12 else ("*" * len(k))
+    d["api_key_set"] = bool(k)
+    d["api_key"] = mask_key(k)
     return d
+
+
+def mask_key(k):
+    """给界面看的密钥样子。短于 12 位的一律全盖 —— 那个长度露头露尾没有意义。"""
+    k = k or ""
+    return ("%s…%s" % (k[:6], k[-4:])) if len(k) > 12 else ("*" * len(k))
+
+
+def is_masked(k):
+    """判断传进来的这一串是不是打码后的样子。
+
+    存在的理由：`apply_cfg` 单看 `key != cfg["api_key"]` 判不出区别 ——
+    打码串确实不等于真 key，于是它会被当成"用户换了新密钥"写进去，
+    写完 AI 就再也调不动了。前端只要不小心回填一次（复制粘贴、浏览器 autofill、
+    或者哪个版本压根就是预填的）就中招，所以这一层必须在服务端堵。
+    """
+    k = str(k or "")
+    if not k:
+        return False
+    if "…" in k or "..." in k:
+        return True
+    # 全是星号也算：短密钥被打码后就是这个形状
+    return bool(k) and set(k) == {"*"}
 
 
 def apply_cfg(cfg, p):
@@ -253,9 +279,14 @@ def apply_cfg(cfg, p):
         changed.append("接口地址 → " + base)
 
     key = str(p.get("api_key") or "").strip()
-    if key and key != cfg.get("api_key"):
+    # 打码串绝不能写进去：它 != 真 key，会通过下面的 != 判断，然后覆盖掉真的那把，
+    # 之后 AI 一句也说不出来。空串（前端留空 = 沿用当前）和打码串在这里都要放过。
+    if key and not is_masked(key) and key != cfg.get("api_key"):
         cfg["api_key"] = key
         changed.append("密钥已更新")
+    elif is_masked(key):
+        # 不静默吞掉 —— 用户看到"保存成功"却发现密钥没换成他填的那把会以为见鬼了
+        changed.append("密钥没改（填的是打码后的样子，服务器上那把没动）")
 
     chat = str(p.get("chat") or "").strip()
     if chat and chat != cfg.get("model"):

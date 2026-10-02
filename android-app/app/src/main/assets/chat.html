@@ -345,8 +345,8 @@ body.notab .page { bottom:0; }
     </div>
     <div class="grp">
       <div class="setrow"><div class="lab">接口地址</div><input id="mBase" placeholder="https://…/v1"></div>
-      <div class="setrow"><div class="lab">密钥</div><input id="mKey" placeholder="留空 = 不改，继续用现在这个"></div>
-      <div class="hint">存在云上的配置里，她调模型接口时用。改新的就填完整 key，想保持原样就留空。</div>
+      <div class="setrow"><div class="lab">密钥</div><input id="mKey" placeholder="sk-…"></div>
+      <div class="hint">存在云上的配置里，她调模型接口时用。这台设备看不到密钥本身，留空 = 沿用现在那把；想换就填完整的新 key。</div>
     </div>
     <div class="grp">
       <div class="setrow"><div class="lab">对话模型</div><select id="mChat"></select></div>
@@ -1537,10 +1537,12 @@ async function loadModelCfg(force) {
     const d = await r.json();
     mCur = d.current || {}; mGroups = d.groups || {}; mProvs = d.providers || [];
     mProv = mCur.provider || 'siliconflow';
-$('mBase').value = mCur.api_base || '';
-    // 不预填真key：服务端只回脱敏的（前后各几位），够认出是哪一把、不够用
+    $('mBase').value = mCur.api_base || '';
+    // 密钥框永远空着。服务端只回 api_key_set（有没有那把），不回明文也不回
+    // 打码串 —— 打码串摆在输入框里，手一抖复制重贴回去就会把真 key 覆盖掉。
+    // 这里即使收到打码串也丢掉。
     $('mKey').value = '';
-    $('mKey').placeholder = mCur.api_key ? ('当前：' + mCur.api_key + '　留空 = 不改') : 'sk-…';
+    $('mKey').placeholder = mCur.api_key_set ? '已有一把，留空 = 不改' : 'sk-…';
     markProvider(mProv);
     // 视觉模型也能聊天，所以对话那栏把 VL 系列一起列出来
     fillSel('mChat', (mGroups.chat || []).concat(mGroups.vision || []),
