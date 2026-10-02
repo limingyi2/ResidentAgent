@@ -9,6 +9,15 @@ id_rsa*
 # API key 写在 config.json 里，一律忽略，改推 config.example.json
 brain/config/config.json
 config.json
+# ⚠️ world.json 同理：里面是角色的学校/专业/宿舍号/室友真名 ——
+# 仓库只放 world.example.json（字段全空），真实的那份留在本地。
+brain/config/world.json
+brain/config/*.bak*
+# 注意：不要写 brain/config/*.json 通配 + !例外 —— 父级一旦被整条排除，
+# 后面的 ! 规则不生效（git 不会进已排除的目录找例外）。
+# 需要新增配置文件时，在下面显式写一行 !brain/config/xxx.json 即可。
+!brain/config/config.example.json
+!brain/config/world.example.json
 # backup 里同样躺着完整的 key，必须挡
 *.bak*
 *.bak_*
@@ -69,24 +78,18 @@ pet/launchers/run_pet_cloud.bat
 
 # ===== 不进公开仓库的文档（文件留在本地 docs\，只是不提交）=====
 # 通配规则整条兜住：docs\ 下任何"逐条列出真实聊天记忆"的文件都不入库。
-# 2026-10-02 删掉了 docs\记忆库清单.md，但同类的报告随时会再生成一份，
-# 所以规则改成 docs\*记忆*.md + docs\*清单*.md，不再依赖具体文件名。
 docs/*记忆*.md
 docs/*清单*.md
-# ⚠️ 下面两份已上传到公开仓库，里面含真实聊天内容（见下方"已知泄露"）：
-#   docs/记忆与上下文改造说明.md  —— 逐条列了被删的 9 条记忆原文、真实约定的对话回放的对话回放
-#   docs/人设瘦身对照.md          —— 含"记得带东西""大胖鲸"等私人用语
-# **先把这两份改写脱敏再决定要不要重写历史**（改写历史会换掉所有 commit 哈希）。
-# 想彻底清掉就执行：git filter-repo --path docs/记忆与上下文改造说明.md --path docs/人设瘦身对照.md --invert-paths
-# 已经推过远程了，清完必须 force push（用 git -c http.sslVerify=false push --force origin master）。
-docs/记忆与上下文改造说明.md
-docs/人设瘦身对照.md
-# ⚠️ 下面两份曾在公开仓库里，逐条列过真实记忆原文与私人用语。
-# 2026-10-02 已改写脱敏（内容换成泛化描述），现在可以重新入库了 ——
-# 留着这两行是为了万一将来又要撤下时有个提醒。真要撤下文件本身用 git rm --cached。
+# ⚠️ 下面三份曾在公开仓库里，内容已脱敏过，现在可以入库 ——
+# 留着这几行注释是为了将来新增同类文档时有人知道要脱敏。
+# 2026-10-02 的处理：把记忆原文、真机对话回放、私人用语全换成泛化描述，
+# 然后 git filter-repo 重写历史把它们从旧 commit 里也抹掉了。
 #   docs/记忆与上下文改造说明.md
 #   docs/人设瘦身对照.md
-# 2026-09-17 的项目快照，文档自述已过时（本地 4B / QLoRA / Unsloth 均已移除），公开会误导读者
+#   docs/时间感与主动性修复.md
+# 脱敏做法参考：真实原文 → 类型描述（"模型幻觉类""旧人设残留类"），
+# 真机回放 → 只写验证方向不写具体内容。
+# 本地私有的（内容确实过时且含私人信息，不入库）：
 docs/*进度诊断*.md
 # 私人素材：人脸参考图 / 立绘 —— 上一节的 *.jpg 只能挡图片，挡不住目录里的其他文件
 brain/config/look_refs/
