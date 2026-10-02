@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.zhixia.chat'
+    namespace 'com.resident.chat'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.zhixia.chat"
+        applicationId "com.resident.chat"
         minSdk 24
         targetSdk 34
         versionCode 1

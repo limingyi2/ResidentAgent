@@ -1,4 +1,4 @@
-package com.zhixia.chat;
+package com.resident.chat;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -224,7 +224,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void saveLog(String name, String text) {
             String n = (name == null || name.trim().isEmpty())
-                    ? "zhixia_log.txt" : name.trim();
+                    ? "chat_log.txt" : name.trim();
             String body = (text == null) ? "" : text;
             String where;
             try {
@@ -285,7 +285,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void saveImage(String name, String b64) {
             String n = (name == null || name.trim().isEmpty())
-                    ? ("zhixia_" + System.currentTimeMillis() + ".jpg") : name.trim();
+                    ? ("chat_" + System.currentTimeMillis() + ".jpg") : name.trim();
             String msg;
             try {
                 byte[] data = Base64.decode(b64 == null ? "" : b64, Base64.NO_WRAP);

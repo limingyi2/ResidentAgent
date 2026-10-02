@@ -1,4 +1,4 @@
-package com.zhixia.chat;
+package com.resident.chat;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -138,8 +138,7 @@ public class PollService extends Service {
                 ? new Notification.Builder(this, CHAN)
                 : new Notification.Builder(this);
         // 通知标题用人设名（页面启动时通过 Android.saveWho 同步过来），不写死角色名
-        String who = android.content.SharedPreferences
-                .getSharedPreferences("zx", MODE_PRIVATE)
+        String who = getSharedPreferences("zx", MODE_PRIVATE)
                 .getString("who", "").trim();
         b.setSmallIcon(android.R.drawable.stat_notify_chat)
          .setContentTitle(who.isEmpty() ? "新消息" : who)

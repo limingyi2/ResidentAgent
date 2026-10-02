@@ -44,10 +44,26 @@ p = subprocess.run([gradle, "-p", ROOT, "assembleDebug", "--no-daemon"],
 print("RC", p.returncode)
 
 apk = os.path.join(ROOT, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+dst = os.path.join(HERE, "zhixia.apk")
+
+# 构建失败时必须先把错误打出来再退出。之前这里只在"APK 文件不存在"时才
+# 打印 stdout，而 APK 是上一次成功留下的旧文件 —— 于是失败也照样打印一行
+# "APK 256937 ..."，看着像成功了。gradle 的中文报错在 javac 那段，
+# 只看结尾几行还会以为是别的问题。
+if p.returncode != 0:
+    out = p.stdout or ""
+    # 错误在最后 60 行里，javac 的中文信息在这里面
+    tail = out[-3000:] if out else "(gradle 没有 stdout)"
+    print("构建失败，最后 3000 字输出：")
+    print(tail)
+    if p.stderr:
+        print("stderr:", p.stderr[-1000:])
+    raise SystemExit("gradle assembleDebug 失败（RC %d），没生成新 APK" % p.returncode)
+
 if os.path.exists(apk):
-    dst = os.path.join(HERE, "zhixia.apk")
     shutil.copyfile(apk, dst)
     print("APK", os.path.getsize(dst), dst)
 else:
     print("NO APK")
     print((p.stdout or "")[-400:])
+    raise SystemExit("gradle 说成功了但找不到 APK，产物路径变了？")

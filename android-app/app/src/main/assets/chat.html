@@ -215,7 +215,7 @@ body.notab .page { bottom:0; }
   <div class="body">
     <div class="mehead" onclick="pick('myav')">
       <div class="cav" id="meAv"></div>
-      <div class="cmain"><div class="menick" id="meNick">我</div><div class="meid">ID：zhixia_friend</div></div>
+      <div class="cmain"><div class="menick" id="meNick">我</div><div class="meid">ID：me</div></div>
       <span class="arrow">›</span>
     </div>
     <div class="grp">
@@ -276,7 +276,7 @@ body.notab .page { bottom:0; }
     <div class="prof">
       <div class="cav" id="pfAv"></div>
       <div class="pn" data-who>她</div>
-      <div class="pr">ID：linzhixia　地区：四川 成都</div>
+      <div class="pr" data-her-id>ID：her</div>
     </div>
     <button class="pbtn" onclick="openChat()">发消息</button>
   </div>
@@ -1305,6 +1305,14 @@ function applyWho(name) {
   if (!n) return;
   document.querySelectorAll('[data-who]').forEach(el => { el.textContent = n; });
   document.title = n;
+  // ID 跟着人设名走：把名字里的非字母数字去掉当 ID。
+  // 不写死 —— 仓库里不该预置任何具体角色，ID 同理。
+  // 注意这里只能拿到 name（/api/persona 只回了名字），所以不显示"地区"：
+  // 拿不到的值就别编一个填上去，空着更诚实。
+  const py = n.toLowerCase().replace(/[^a-z0-9]/g, '') || 'her';
+  document.querySelectorAll('[data-her-id]').forEach(el => {
+    el.textContent = 'ID：' + py;
+  });
   try { localStorage.setItem('zx_who', n); } catch (e) {}
   // 同步给原生：通知标题要用她的名字，不能写死
   try { if (window.Android && window.Android.saveWho) window.Android.saveWho(n); } catch (e) {}
