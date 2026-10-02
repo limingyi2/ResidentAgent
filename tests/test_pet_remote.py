@@ -70,6 +70,19 @@ class TestTokenHandling(unittest.TestCase):
         src = inspect.getsource(remote_brain.RemoteBrain._post)
         self.assertNotIn('"token=" +', src)
 
+    def test_get_also_uses_the_header(self):
+        """_get 走的是 /api/persona、/api/history、/api/diary/* 这类纯 JSON 接口，
+        全都能带请求头 —— token 不该再出现在 URL 上。"""
+        src = inspect.getsource(remote_brain.RemoteBrain._get)
+        self.assertIn("Authorization", src)
+        self.assertNotIn('"token=" +', src)
+
+    def test_post_is_defined_exactly_once(self):
+        """回归：RemoteBrain 里曾经有**两个** _post（旧的那个把 token 拼在 URL 上），
+        靠"后定义的赢"才碰巧走对 —— 读代码的人完全看不出哪份在生效。"""
+        src = inspect.getsource(remote_brain.RemoteBrain)
+        self.assertEqual(src.count("def _post("), 1)
+
     def test_life_requests_also_use_the_header(self):
         for fn in (remote_brain.RemoteLife._get, remote_brain.RemoteLife._post):
             src = inspect.getsource(fn)

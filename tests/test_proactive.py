@@ -134,8 +134,10 @@ class TestClientIp(unittest.TestCase):
         proactive._LAST_IP.update(self._old)
 
     def test_public_ip_is_remembered(self):
-        proactive.note_client_ip("47.114.58.45")
-        self.assertEqual(proactive._his_ip(), "47.114.58.45")
+        # 203.0.113.0/24 是 RFC 5737 保留给文档用的地址段（TEST-NET-3）：
+        # 拿它当"一个公网 IP"的样本，既真实又不会把真实服务器地址写进公开仓库。
+        proactive.note_client_ip("203.0.113.7")
+        self.assertEqual(proactive._his_ip(), "203.0.113.7")
 
     def test_internal_addresses_are_ignored(self):
         """桌宠走 SSH 隧道进来是 127.0.0.1 —— 那不是"他在哪"。"""

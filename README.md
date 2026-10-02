@@ -220,6 +220,38 @@ CI（`.github/workflows/tests.yml`）在每个 push 上跑这套用例 + 一次�
 
 只记重要变更；App 版本号是安装包内的 `APP_CODE`，手机端"检查更新"据此提示。
 
+- **2026-10-03 · 第二轮逐行复核（含上一轮遗留与脱敏副作用）**：
+  - **修掉一个静默到几乎不可能被发现的人设回退**：脱敏时把人设文件改成了
+    `personas/default.json`，而 `config.json` 的 `persona_file` 还指着旧名字 ——
+    `persona_store.load()` 读不到文件时**一句话都不说**，直接返回内置空模板，
+    于是她的自定义人设被悄悄换掉，表现只有"她好像不太一样了"。
+    现在：读不到会明确打印（并说明改用的是哪一份）；配置那份不在而 `default.json`
+    在时先退到它就是。**本地 `config.json` 的 `persona_file` 仍需你手动改成
+    `personas/default.json`**（那份文件已 gitignore，我改不了它对你的部署生效）。
+  - **测试自身两处问题**：`test_manifest_activity_matches_package` 只匹配 `com.` 开头的
+    全限定名，而 Manifest 用的是相对名 `.MainActivity` —— `findall` 返回空、循环一次没跑，
+    **这个测试一直"绿"着但什么都没断言**（已改成相对/全限定两种都认，并核对类文件存在）；
+    新增 `tests/test_source_hygiene.py`，静态扫"同一作用域重复定义同名函数"—— 这个仓库
+    真踩过两次（`chat.html` 的 `copyText`、`remote_brain.py` 的 `_post`），Python 里后者静默覆盖前者。
+  - **补掉一个我自己引入的并发缺陷**：`_trace_write` 与 `_trace_trim` 之间没有锁，
+    而 trace 是请求线程 + 6 条自治循环一起写的 —— 轮转的"读全文→写回前半"会和
+    另一条线程的 append 交错，把刚写进去的那条连带丢掉。现在落盘与轮转共用一把锁。
+  - **修掉 `remote_brain.py` 里重复定义的 `_post`**：旧那份（token 拼在 URL 上）和新那份
+    （走 `Authorization` 头）同时存在，靠"后定义的赢"才碰巧走对 —— 读代码的人完全看不出。
+    顺手让 `RemoteBrain._get` 也走请求头（它访问的全是纯 JSON 接口，能带头）。
+  - **trace 记错了轮次**：工具调用会走两轮 `chat`，而快照只抄了**第一轮**（工具判断那次）
+    的数字；`[tool:]` 用了哪个工具也只打到 stdout、重启就没。现在每轮覆盖（记最后一轮，
+    即用户真正看到的那次），并把工具名写进 trace。
+  - **聊天锁的等待上限改成算出来的**：模型 60s + 重试间隔 1.5s + 重试 60s = 121.5s，
+    工具轮两次 ≈ 243s，加 UAPI 最坏 12s ≈ **255s** —— 原值 240 会在正常慢请求上误报"她正忙着"，
+    已按推导取 300。
+  - **脱敏补遗**：`tests/` 里我上一轮用了**真实的云服务器 IP** 当测试样本，已换成
+    RFC 5737 的文档保留段（`203.0.113.0/24`）。另外这两处拼音还没脱（都在追踪文件里、
+    都是可被搜索到的）：`android-app/settings.gradle` 的 `rootProject.name`、
+    `MainActivity.java` 里的 User-Agent `ZhixiaChat/1.0`；`pet/launchers/autostart_*.bat`、
+    `deploy/rebuild_apk.py` 与云端 `zhixia.apk` 这类**部署路径/文件名**与本地环境耦合，
+    改名要连着改云端和计划任务，没动。
+
 - **2026-10-03 · 一次"说法与代码对齐"的体检（据代码逐行复核）**：这轮改的是**声称与实际不符**和几个一直静默失效的地方，不是新功能。
   - **修掉一个鉴权口子**：`brain_token` 为空时 _check 直接放行（fail-open），配上文档推荐的 `bind_host: "0.0.0.0"` 就是公网无鉴权 —— 现在空 token 只放行本机回环，且对外绑定时**拒绝启动**；比对改用 `hmac.compare_digest`；`do_POST` 加 12MB 请求体上限（以前 `Content-Length` 报多大就读多大进内存）。
   - **并发**：`MemoryStore` 原本**一把锁都没有**，而记忆抽取是后台线程在 `add()`、请求线程同时在 `retrieve()` —— 并发写 `memory.json`/`vectors.npy` 是可达的，且损坏是静默的。现在自带可重入锁，网络调用（embedding）放在锁外。chat 锁改成**有上限地获取**（240s）：以前一个卡住的请求能让后面所有人无限期挂死。trace 的字段改成**持锁时抄一份快照**，不再出锁再读共享对象（并发时那一行会张冠李戴）。

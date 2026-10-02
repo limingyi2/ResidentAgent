@@ -22,7 +22,7 @@ class TestLoopback(unittest.TestCase):
             self.assertTrue(server._is_loopback(ip), repr(ip))
 
     def test_non_loopback_addresses(self):
-        for ip in ["0.0.0.0", "47.114.58.45", "192.168.1.5", "10.0.0.1",
+        for ip in ["0.0.0.0", "203.0.113.7", "192.168.1.5", "10.0.0.1",
                    "", None, "example.com"]:
             self.assertFalse(server._is_loopback(ip), repr(ip))
 
@@ -30,13 +30,17 @@ class TestLoopback(unittest.TestCase):
 class TestAuth(unittest.TestCase):
     TOK = "s3cret-token-value"
 
+    # 203.0.113.0/24 是 RFC 5737 的文档保留段：用它当"一个公网 IP"的样本，
+    # 就不会把真实服务器地址写进公开仓库（这个仓库正在脱敏）。
+    PUBLIC_IP = "203.0.113.7"
+
     def test_correct_token_in_header(self):
         self.assertTrue(server._auth_ok("Bearer " + self.TOK, "", self.TOK,
-                                        "47.114.58.45"))
+                                        self.PUBLIC_IP))
 
     def test_correct_token_in_query_still_accepted(self):
         """媒体 URL（<img>/<audio>）设不了请求头，只能走 ?token=，必须继续认。"""
-        self.assertTrue(server._auth_ok("", self.TOK, self.TOK, "47.114.58.45"))
+        self.assertTrue(server._auth_ok("", self.TOK, self.TOK, self.PUBLIC_IP))
 
     def test_wrong_token_rejected(self):
         for bad in ["", "nope", self.TOK[:-1], self.TOK + "x", "Bearer",
@@ -51,7 +55,7 @@ class TestAuth(unittest.TestCase):
         """这是那个 fail-open 口子的回归测试。"""
         self.assertTrue(server._auth_ok("", "", "", "127.0.0.1"))
         self.assertTrue(server._auth_ok("", "", None, "::1"))
-        self.assertFalse(server._auth_ok("", "", "", "47.114.58.45"))
+        self.assertFalse(server._auth_ok("", "", "", self.PUBLIC_IP))
         self.assertFalse(server._auth_ok("", "", "", "192.168.1.9"))
 
     def test_uses_constant_time_comparison(self):

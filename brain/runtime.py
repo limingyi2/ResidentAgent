@@ -86,22 +86,26 @@ def _trace_path():
 
 TRACE_MAX = 4 * 1024 * 1024        # 超过这个大小就砍掉前面一半（按行砍）
 
+# 落盘和轮转必须串起来。trace 是**多线程**在写：请求线程（/api/chat）与 6 条
+# 后台自治循环都会调 _trace_write。没有锁的话，轮转的"读全文→写回前半"会和
+# 另一条线程的 append 交错 —— 那条刚写进去的记录会随着后半段一起被丢掉。
+_TRACE_LOCK = threading.Lock()
+
 
 def _trace_trim(path):
     """trace 是 append-only 的，不设上限就一直长。
 
     和 errlog 同一个做法（按行砍一半，不会砍出半行 JSON）：观测文件不能变成
     磁盘和读取时间的负担 —— /api/stats 每天都要把它读一遍。
+
+    调用方必须已经持有 _TRACE_LOCK（见 _trace_write）。
     """
-    try:
-        if os.path.getsize(path) <= TRACE_MAX:
-            return
-        with open(path, encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-        with open(path, "w", encoding="utf-8") as f:
-            f.writelines(lines[len(lines) // 2:])
-    except Exception:
-        pass
+    if os.path.getsize(path) <= TRACE_MAX:
+        return
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines[len(lines) // 2:])
 
 
 def _trace_write(rec):
@@ -119,9 +123,10 @@ def _trace_write(rec):
     try:
         p = _trace_path()
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        _trace_trim(p)
+        with _TRACE_LOCK:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            _trace_trim(p)
     except Exception:
         pass
 

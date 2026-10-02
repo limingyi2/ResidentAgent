@@ -254,18 +254,47 @@ class TestNoHardcodedIdentity(unittest.TestCase):
                                  "%s 的 package 声明与 build.gradle 不一致" % fn)
 
     def test_manifest_activity_matches_package(self):
-        """AndroidManifest 里的 android:name 用全限定类名，写错运行期才崩。"""
+        """AndroidManifest 里的组件名必须落在当前命名空间下。
+
+        ⚠️ 两种写法都得认：相对名 `.MainActivity`（AGP 按 namespace 拼）和全限定名。
+        这个测试原来只匹配 `com.` 开头的全限定名，而这份 Manifest 用的是**相对名** ——
+        于是 `findall` 返回空、循环一次都没跑，测试一直"绿"着但什么都没断言。
+        （这正是"测试看着像保护、实际是空转"的那种坑，和空 token 全放行同一类。）
+        """
         mf = os.path.join(ROOT, "android-app", "app", "src", "main",
                           "AndroidManifest.xml")
         with open(mf, encoding="utf-8") as f:
             src = f.read()
         self.assertNotIn(self._zhixia(), src, "Manifest 里还有角色名")
+
         g = os.path.join(ROOT, "android-app", "app", "build.gradle")
         with open(g, encoding="utf-8") as f:
             ns = re.search(r"namespace\s+'([^']+)'", f.read()).group(1)
-        for cls in re.findall(r'android:name="(com\.[^"]+)"', src):
-            self.assertTrue(cls.startswith(ns + "."),
-                            "Manifest 里的 %s 不在 %s 命名空间下" % (cls, ns))
+
+        comps = re.findall(
+            r"<(?:activity|service|receiver|provider)\b[^>]*?"
+            r'android:name="([^"]+)"', src, re.S)
+        self.assertTrue(comps, "一个组件都没解析到 —— 正则失效，测试又在空转")
+        for name in comps:
+            if name.startswith("."):
+                resolved = ns + name
+            elif "." not in name:
+                resolved = ns + "." + name
+            else:
+                resolved = name
+            self.assertTrue(
+                resolved.startswith(ns + "."),
+                "Manifest 组件 %s 解析成 %s，不在命名空间 %s 下"
+                % (name, resolved, ns))
+
+        # 组件名改了、java 文件没跟着改的话运行期才会崩 —— 顺手核一下类文件在不在
+        java_dir = os.path.join(ROOT, "android-app", "app", "src", "main",
+                                "java", *ns.split("."))
+        for name in comps:
+            cls = name.rsplit(".", 1)[-1]
+            self.assertTrue(
+                os.path.isfile(os.path.join(java_dir, cls + ".java")),
+                "Manifest 声明的 %s 找不到对应的 %s.java" % (name, cls))
 
     def test_no_hardcoded_region_in_profile_page(self):
         """资料页的地区不能写死 —— 换人设后它会露出上一个角色的籍贯。"""

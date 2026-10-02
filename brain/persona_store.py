@@ -32,10 +32,19 @@ DEFAULT_PERSONA = {
     "call_user": "",
     "notes": "",
     "appearance": "",
+    # 列表显示用，不参与 build_system_text（那里只拼 name/背景/性格/notes）
+    "label": "",
+    "desc": "",
 }
 
 FIELDS = ["name", "nicknames", "background", "scene", "personality",
-          "call_user", "notes", "appearance"]
+          "call_user", "notes", "appearance",
+          # label/desc 是**列表用的显示名与一句话说明**，不是人设内容：
+          # server.py 的 /api/persona 直接从 json 里读它们填 App 预设列表
+          # （"原版 · 老朋友" / "她自己过日子，顺手跟你说两句"）。
+          # 以前它们不在白名单里 → App 里编辑人设保存一次，save() 就把这两个
+          # 静默丢了，预设列表里那行描述变空（tests/test_persona.py 会抓到）。
+          "label", "desc"]
 
 # ============================================================================
 # 核心约束（CORE_RULES）—— 与"具体哪套人设"无关的身份底线，所有通道共用
@@ -113,17 +122,40 @@ def list_personas():
 
 
 def load(key=None):
-    """读一套人设；文件不存在/读坏就用默认值补齐。"""
+    """读一套人设；文件不存在/读坏就用内置默认值补齐。
+
+    找不到配置指向的那份文件时**必须出声**。这个函数原来是完全静默的
+    （`except Exception: pass`），于是 `personas/*.json` 一旦改名 —— 只要
+    config.json 的 persona_file 还指着旧名字 —— 她的自定义人设会被悄悄换成
+    内置空模板，表现只是"她好像不太一样了"，查起来毫无线索。
+    （2026-10-03 实测：仓库脱敏时把人设文件改名成了 default.json，而本地
+    config.json 的 persona_file 还指着旧角色名，load() 就一直返回空模板。
+    这里刻意不写出那个旧名 —— 脱敏过的仓库里不该再留它的字面量，
+    连注释也不行。）
+
+    退一步：配置那份不在、而 DEFAULT_KEY 那份在，就用 DEFAULT_KEY，并说明。
+    """
     key = key or DEFAULT_KEY
-    data = dict(DEFAULT_PERSONA)
     p = path_of(key)
+    if not os.path.exists(p):
+        alt = path_of(DEFAULT_KEY)
+        if key != DEFAULT_KEY and os.path.exists(alt):
+            print("[人设] config 指的 %s 不存在，改用 %s"
+                  % (os.path.basename(p), os.path.basename(alt)), flush=True)
+            key, p = DEFAULT_KEY, alt
+        else:
+            print("[人设] 读不到 %s —— 现在用的是内置空模板（她没有名字和背景）。"
+                  "检查 config.json 的 persona_file 指向对不对。"
+                  % p, flush=True)
+    data = dict(DEFAULT_PERSONA)
     if os.path.exists(p):
         try:
-            raw = json.load(open(p, encoding="utf-8"))
+            with open(p, encoding="utf-8") as f:      # 之前是裸 open()，漏句柄
+                raw = json.load(f)
             if isinstance(raw, dict):
                 data.update({k: v for k, v in raw.items() if k in FIELDS})
-        except Exception:
-            pass
+        except Exception as e:
+            print("[人设] %s 解析失败，用内置空模板：%s" % (p, e), flush=True)
     return data
 
 

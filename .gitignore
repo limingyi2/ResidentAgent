@@ -94,6 +94,13 @@ docs/*进度诊断*.md
 # 私人素材：人脸参考图 / 立绘 —— 上一节的 *.jpg 只能挡图片，挡不住目录里的其他文件
 brain/config/look_refs/
 brain/config/personas/*.retired*
+# ⚠️ 人设文件本体必须挡住（2026-10-03 补）——
+# 原来只挡了 *.retired*，等于**整个 personas/ 目录里的 .json 都是入库的**。
+# 仓库里预置的 default.json 是空模板所以一直没出事，但用户按 README 填完自己的
+# 人设后 `git add -A` 就会把角色名/背景/外貌/日记口吻全推到公开仓库。
+# 模板要入库（别人 clone 下来有格式可参考），已填的不能入 → 只显式放行 default.json。
+brain/config/personas/*.json
+!brain/config/personas/default.json
 # 记忆库本体（memory.json / vectors.npy / chat_history.jsonl / 日记 / 摘要）
 # —— 已在上面的 data/ 规则里整目录挡住，这里再显式写一遍是为了让人一眼看到
 brain/data/memory/

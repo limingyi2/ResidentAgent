@@ -110,10 +110,16 @@ def build_local_brain(verbose=True):
     return b
 
 
-# 聊天锁的等待上限（秒）。一次 chat 最坏要多久：模型调用 60s + 重试一次 60s，
-# 工具循环还会再走一轮 —— 所以排队上限要比这更大。超了就明说"在忙"，
-# 而不是像以前那样无超时地挂着（一个 120 秒的请求能把后面所有人堵死）。
-CHAT_LOCK_WAIT = 240
+# 聊天锁的等待上限（秒）。这个数得**算出来**，不能拍：
+#   一轮 brain.chat 最坏 = 模型 60s + 重试间隔 1.5s + 重试 60s = 121.5s
+#   工具轮最多两次 chat（首次判断 + 喂回结果重答）      = 243s
+#   UAPI 那次真实调用最坏 = 6s × 2 次机会               = 12s
+#   合计约 255s（图片/语音的合成在锁外，不算）
+# 取 300 给它留余量。超了就明说"在忙"，而不是像以前那样无超时地挂着
+# （一个卡住的请求能把后面所有人无限期堵死）。
+# 注意：客户端自己的超时更短（桌宠 POST 90s、浏览器默认约 300s），
+# 所以真正先放弃的通常是客户端 —— 这个上限主要是别让服务端线程无限期占着。
+CHAT_LOCK_WAIT = 300
 
 # 单次请求体上限（字节）。正常聊天几 KB，带图 base64 也就几 MB；
 # 12MB 足够用，同时挡住"报个超大 Content-Length 把内存打满"这条路。
@@ -196,8 +202,10 @@ def _chat_with_tools(text, img_path, trace_out=None):
             b = _LOCAL["brain"]
             ans, mode = b.chat(t, img=img_path, log=False)
             # trace 字段长在共享的大脑对象上，必须趁锁还在手里抄一份 ——
-            # 出了锁再读，并发的那一轮会把它覆盖掉（trace 张冠李戴）
-            if trace_out is not None and not trace_out:
+            # 出了锁再读，并发的那一轮会把它覆盖掉（trace 张冠李戴）。
+            # 每轮都覆盖：工具调用会走两轮 chat，用户看到的是**最后一轮**的结果，
+            # 记第一轮的数字等于记错了那一轮（早先写成 `not trace_out` 就踩了这个）。
+            if trace_out is not None:
                 trace_out.update(_snapshot(b))
             return ans, mode
 
@@ -217,6 +225,10 @@ def _chat_with_tools(text, img_path, trace_out=None):
     ans, mode, used = _tools.run_chat_with_tools(_once, text)
     if used:
         print(f"[大脑] 她调用了工具 {used}", flush=True)
+        # 用过的工具要进 trace：以前这句话只打到 stdout，重启就没了，
+        # "这轮为什么答成那样"少了一半线索（调没调工具、调的哪个）
+        if trace_out is not None:
+            trace_out["tool"] = used
     return ans, mode
 
 
@@ -517,6 +529,7 @@ def start_remote_api(brain):
                             "ms": _snap.get("ms"),
                             "tok_in": _snap.get("tok_in"),
                             "tok_out": _snap.get("tok_out"),
+                            "tool": _snap.get("tool") or "",
                             "mode": mode,
                             "fallback": 1 if err or mode == "API失败" else 0,
                         })

@@ -70,29 +70,6 @@ class RemoteBrain:
 
     # --- 底层 ---
     def _post(self, path, payload, timeout=90):
-        body = dict(payload)
-        url = self.base + path
-        if self.token:
-            sep = "&" if "?" in url else "?"
-            url += sep + "token=" + urllib.parse.quote(self.token)
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="POST")
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-
-    def _get(self, path, timeout=10):
-        sep = "&" if "?" in path else "?"
-        url = self.base + path
-        if self.token:
-            url += sep + "token=" + urllib.parse.quote(self.token)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(urllib.request.Request(url), timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-
-    def _post(self, path, payload, timeout=90):
         """POST 一份 JSON 到云上（鉴权走 Authorization 头，不再拼进 URL）。
 
         URL 里的 token 会进各级访问日志和 Referer；媒体 URL（<img>/<audio>）
@@ -105,6 +82,20 @@ class RemoteBrain:
             headers={"Content-Type": "application/json",
                      "Authorization": "Bearer " + self.token},
             method="POST")
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    def _get(self, path, timeout=10):
+        """GET 一份 JSON（同样走 Authorization 头）。
+
+        这里走的是 /api/persona、/api/history、/api/diary/* 这类**纯 JSON 接口**，
+        全都能带请求头 —— 所以 token 不该再出现在 URL 上。真正带不了头的只有
+        <img>/<audio> 的媒体地址，那些在客户端侧单独拼 ?token=。
+        """
+        req = urllib.request.Request(
+            self.base + path,
+            headers={"Authorization": "Bearer " + self.token})
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))

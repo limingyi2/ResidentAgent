@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 
 sys.path.insert(0, os.path.join(
@@ -79,6 +80,61 @@ class TestTrace(unittest.TestCase):
                 line = line.strip()
                 if line:
                     self.assertIn("n", json.loads(line))
+
+    def test_trim_runs_under_the_same_lock_as_append(self):
+        """确定性检查轮转有没有在锁里跑。
+
+        轮转是"读全文 → 写回前半"，必须和 append 串在**同一把锁**里；否则另一条
+        线程刚追加的记录会随后半段一起被丢掉，读的一刻还可能读到半行 JSON。
+        这里直接替掉 _trace_trim，看它被调用时锁是不是已经握在手里 ——
+        比"多线程跑一遍盼着它炸"可靠得多。
+        """
+        orig = runtime._trace_trim
+        seen = {}
+
+        def spy(path):
+            seen["locked"] = runtime._TRACE_LOCK.locked()
+            return orig(path)
+
+        runtime._trace_trim = spy
+        try:
+            runtime._trace_write({"n": 1})
+        finally:
+            runtime._trace_trim = orig
+        self.assertTrue(seen.get("locked"), "轮转没在锁里跑（会和 append 交错）")
+
+    def test_concurrent_writes_never_produce_torn_lines(self):
+        """并发写 + 频繁轮转之下，文件里不许出现半行 JSON、也不许重复。
+
+        注：**不断言全局递增** —— 8 条线程各写自己的序列，交错顺序本来就不确定，
+        断言排序是在测"调度运气"而不是测代码。
+        """
+        runtime.TRACE_MAX = 4000          # 压小，让轮转在测试里频繁发生
+        n_threads, per_thread = 8, 60
+
+        def worker(k):
+            for i in range(per_thread):
+                runtime._trace_write({"n": k * 1000 + i, "pad": "x" * 30})
+
+        threads = [threading.Thread(target=worker, args=(k,))
+                   for k in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        with open(self.path, encoding="utf-8") as f:
+            raw = [ln for ln in (l.strip() for l in f) if ln]
+        self.assertTrue(raw, "轮转把文件砍空了")
+        recs = [json.loads(ln) for ln in raw]     # 半行 JSON 会在这里抛
+        ns = [r["n"] for r in recs]
+        self.assertEqual(len(ns), len(set(ns)), "同一条记录被写了两遍")
+        # 轮转只砍前面，留下的必须是最近的一批：最后一条属于最后收尾的线程
+        last_writes = {k * 1000 + per_thread - 1 for k in range(n_threads)}
+        self.assertIn(ns[-1], last_writes,
+                      "文件尾部不是最近写入的那批（轮转把新的砍了）")
+        self.assertLessEqual(os.path.getsize(self.path),
+                             runtime.TRACE_MAX + 400)
 
 
 if __name__ == "__main__":
