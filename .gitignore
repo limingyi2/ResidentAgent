@@ -108,9 +108,9 @@ brain/data/her_life/
 _history*
 _smoke*
 
-# ===== CI（暂不入库）=====
-# .github/workflows/tests.yml 是有用的 CI：每次 push 跑 135 个用例 + 全仓 compileall。
-# 2026-10-02 暂不入库，因为 gh 的 OAuth token 缺 workflow scope，
-# GitHub 会拒绝任何含 workflow 文件的 push（remote rejected）。
-# 补回：gh auth refresh -h github.com -s workflow → 删掉下面两行 → git add .github/
-.github/
+# ===== CI =====
+# .github/workflows/tests.yml 已入库（2026-10-02 补上）。
+# 之前暂不入库是因为 gh 的 OAuth token 缺 workflow scope，GitHub 会拒绝
+# 任何含 workflow 文件的 push。补正办法：
+#   gh auth refresh -h github.com -s workflow
+# 如果又出现 remote rejected（缺 workflow scope），先查 scopes 再推。
