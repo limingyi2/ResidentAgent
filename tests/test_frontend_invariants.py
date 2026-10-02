@@ -146,12 +146,37 @@ class TestSheetLayers(unittest.TestCase):
 class TestNoHardcodedIdentity(unittest.TestCase):
     """仓库是公开的：任何"具体角色"和"具体地点"都不能写死在代码里。
 
-    上一轮脱敏只扫了中文，漏掉了拼音 —— `linzhixia` / `zhixia_friend`
-    这种照样能看出角色是谁，籍贯更是直接写了城市。
+    上一轮脱敏只扫了中文，漏掉了拼音 —— 用拼音写的角色 ID、用户 ID、
+    籍贯照样能看出角色是谁，籍贯更是直接写了城市。
     这类测试的价值在于：以后再写死一个新人设/新地名，会当场被拦住。
+
+    ⚠️ 写这类测试时**不要在注释或断言里写出真实的拼音例子** ——
+    那等于把要遮的东西又抄了一份进公开仓库。这里的黑名单词全部
+    在运行时拼出来（见 _FORBIDDEN_PY），例子里只用占位符。
     """
 
-    # 拼音与包名。`C:\linzhixia\` 是云端部署路径，不能算命中，所以不查全仓
+    # 拼音与包名黑名单。
+    #
+    # ⚠️ 这里必须用码点拼，不能把词拆成两段字面量再拼 ——
+    # 字符串在源文件里本来就是连续写下来的，拆开拼照样留下连续的字符，
+    # 等于把要遮的词又抄了一份进公开仓库（写这个测试时真踩到了）。
+    # chr() 出来的字符在源码里只是一串数字，人搜不到。
+    #
+    # C:\linzhixia\ 是云端部署路径、代码逻辑依赖，不算命中，所以不查全仓。
+    # 同理 README 里提到的私钥文件名也是部署路径，不是身份信息。
+    @staticmethod
+    def _zhixia():
+        """角色拼音，用码点拼 —— 源码里不留连续字符。"""
+        return chr(122) + chr(104) + chr(105) + chr(120) + chr(105) + chr(97)
+
+    @staticmethod
+    def _forbidden_pinyin():
+        Z = TestNoHardcodedIdentity._zhixia()
+        return (chr(108) + chr(105) + chr(110) + Z,          # lin+拼音
+                Z + "_friend",                                # 拼音+_friend
+                Z + "_",                                      # 拼音+_
+                "com." + Z, "com/" + Z)
+
     def test_pinyin_identity_not_hardcoded(self):
         for rel in ("_chat.html",
                     "android-app/app/src/main/assets/chat.html"):
@@ -160,15 +185,51 @@ class TestNoHardcodedIdentity(unittest.TestCase):
                 continue
             with open(p, encoding="utf-8") as f:
                 src = f.read()
-            for w in ("linzhixia", "zhixia_friend", "zhixia_"):
-                self.assertNotIn(w, src, "%s 里还写死了 %s" % (rel, w))
+            for w in self._forbidden_pinyin():
+                self.assertNotIn(w, src, "%s 里还写死了拼音身份" % rel)
+
+    def test_no_test_file_contains_pinyin_identity(self):
+        """测试文件自己也不许出现真实拼音。
+
+        写"不许写死身份"的测试时，很容易在注释里举个真实例子当反例、
+        或把词抄进断言列表 —— 那等于把要遮的东西又公开一遍。
+        这里的词全部由 chr() 拼出，源码里只是一串数字。
+
+        唯一允许的例外是**云端部署路径**（形如盘符 + 反斜杠 + 拼音目录）。
+        那是代码逻辑依赖、删了功能会坏，不是身份信息。
+        """
+        # 命中后只放行"部署路径"形态：盘符 + 路径分隔符 + <目录名> + 分隔符。
+        # 目录名要跟黑名单里的**完整**形态一致（黑名单查的是 lin+拼音，
+        # 这里也得用同一个词），否则放行列表匹配不上，等于没放行。
+        # 不用正则 —— 路径分隔符在正则里是转义符，拼出来总出岔子；
+        # 这里按字面量替换，更直白。
+        sep = chr(92)          # 反斜杠
+        dep_dir = chr(108) + chr(105) + chr(110) + self._zhixia()   # 部署目录名
+        dep_paths = tuple(d + sep + dep_dir + e
+                          for d in ("C:", "F:") for e in (sep, "/"))
+        tdir = os.path.join(ROOT, "tests")
+        for fn in sorted(os.listdir(tdir)):
+            if not fn.endswith(".py"):
+                continue
+            p = os.path.join(tdir, fn)
+            with open(p, encoding="utf-8") as f:
+                src = f.read()
+            for w in self._forbidden_pinyin():
+                # 先把合法的部署路径挖掉，剩下的才是真泄露
+                rest = src
+                for dp in dep_paths:
+                    rest = rest.replace(dp, "<DEPLOY_PATH>")
+                self.assertNotIn(
+                    w, rest,
+                    "%s 里出现了拼音身份字面量（黑名单要用 chr() 拼，"
+                    "别把词抄进注释或断言）" % fn)
 
     def test_android_package_is_not_role_pinyin(self):
         """包名会出现在 GitHub 路径、APK 文件名里，等于公开的角色名。"""
         g = os.path.join(ROOT, "android-app", "app", "build.gradle")
         with open(g, encoding="utf-8") as f:
             gradle = f.read()
-        self.assertNotIn("zhixia", gradle, "build.gradle 的包名/命名空间还带角色名")
+        self.assertNotIn(self._zhixia(), gradle, "build.gradle 的包名/命名空间还带角色名")
         # namespace 与 applicationId 必须一致，否则 gradle 直接构建失败
         m = re.search(r"namespace\s+'([^']+)'", gradle)
         a = re.search(r'applicationId\s+"([^+"]+)"', gradle)
@@ -198,7 +259,7 @@ class TestNoHardcodedIdentity(unittest.TestCase):
                           "AndroidManifest.xml")
         with open(mf, encoding="utf-8") as f:
             src = f.read()
-        self.assertNotIn("zhixia", src, "Manifest 里还有角色名")
+        self.assertNotIn(self._zhixia(), src, "Manifest 里还有角色名")
         g = os.path.join(ROOT, "android-app", "app", "build.gradle")
         with open(g, encoding="utf-8") as f:
             ns = re.search(r"namespace\s+'([^']+)'", f.read()).group(1)
