@@ -68,7 +68,7 @@ class TestParseDate(unittest.TestCase):
                          datetime.date(2026, 9, 30))
 
     def test_bare_day_number(self):
-        self.assertEqual(agenda.parse_date("那个周末放假", self.BASE),
+        self.assertEqual(agenda.parse_date("28号放假", self.BASE),
                          datetime.date(2026, 9, 25))
 
     def test_unparseable_returns_none(self):
@@ -111,7 +111,7 @@ class TestAgendaStateMachine(unittest.TestCase):
 
     def test_past_promise_is_labelled_as_past_and_must_not_be_rescheduled(self):
         today = datetime.date(2026, 9, 29)
-        self._write([{"text": "那个周末放假", "date": "2026-09-28"}])
+        self._write([{"text": "28号放假", "date": "2026-09-28"}])
         blk = agenda.block(today=today, use_cache=False)
         self.assertIn("已经过完的日子", blk)
         self.assertIn("别把日期改到新日子", blk)
