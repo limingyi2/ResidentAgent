@@ -503,13 +503,20 @@ def block(cap=BLOCK_CAP, use_cache=True):
         return ""
 
     entries.sort(key=lambda e: e[0])
+    # entries 已按时间正序（最近的在最后），但预算要优先给最近的。
+    # 从后往前选，选中的再翻正序 —— 少了的那几条是"最早的"，不是"最近的"。
+    # 原来正序遍历 + 超限 break：一旦某条超预算就直接停，后面所有条目全丢，
+    # 而排在后面的恰好是最近几天的事 —— 该记的没记上，丢的却是最该记的。
+    # （当前 MONTH_MAX/WEEK_MAX/DAY_KEEP 的组合下总量约 1300，撞不到 1500 的
+    #  上限，所以这是个等着被踩的隐患，不是正在发生的 bug。）
     lines, used = [], 0
-    for _, lab, txt in entries:
+    for _, lab, txt in reversed(entries):
         seg = "· %s：%s" % (lab, txt.replace("\n", " "))
         if used + len(seg) > cap:
-            break
+            continue                       # 跳过这条，试试后面更短的
         lines.append(seg)
         used += len(seg)
+    lines.reverse()
     if not lines:
         _CACHE["t"], _CACHE["text"] = now, ""
         return ""

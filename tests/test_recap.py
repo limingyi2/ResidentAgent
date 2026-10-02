@@ -4,6 +4,7 @@
 pending_rows 是纯函数：决定"哪些行该压、压到哪一行"。它管着两件事 ——
 不重复压（水位线）、不把某一天截成两半（同一天被压成两段摘要，话题会在中间断掉）。
 """
+import datetime
 import os
 import sys
 import unittest
@@ -101,6 +102,80 @@ class TestDayAlignment(unittest.TestCase):
             self.assertLess(ticks, 20, "压不完：水位线没有推进")
         self.assertEqual(seen, 576)          # 600 - KEEP_RECENT(24)
         self.assertEqual(upto, 576)
+
+
+class TestBlockBudget(unittest.TestCase):
+    """block() 的预算怎么花。
+
+    预算是有限的，而摘要条目长短不一。原来正序遍历 + 超限 break：某条超了
+    就直接停，后面全丢 —— 排在后面的恰好是最近几天的事，等于"该记的没记上，
+    丢的却是最该记的"。改成从最近的往回挑。
+    """
+
+    def setUp(self):
+        import tempfile
+        self._d = tempfile.mkdtemp()
+        self._old_sum = recap_store.SUMMARY_DIR
+        self._old_roll = recap_store.ROLLUP_DIR
+        recap_store.SUMMARY_DIR = self._d
+        recap_store.ROLLUP_DIR = os.path.join(self._d, "rollup")
+        os.makedirs(recap_store.ROLLUP_DIR, exist_ok=True)
+        self._today = datetime.date.today()
+        recap_store._CACHE["text"] = ""
+        recap_store._CACHE["t"] = 0
+
+    def tearDown(self):
+        recap_store.SUMMARY_DIR = self._old_sum
+        recap_store.ROLLUP_DIR = self._old_roll
+        recap_store._CACHE["text"] = ""
+        recap_store._CACHE["t"] = 0
+
+    def _day(self, ago, txt):
+        d = (self._today - datetime.timedelta(days=ago)).isoformat()
+        with open(os.path.join(self._d, d + ".md"), "w", encoding="utf-8") as f:
+            f.write(txt)
+
+    def _lines(self, out):
+        return [ln for ln in out.split("\n") if ln.startswith("·")]
+
+    def test_预算不够时保住的必须是最近的(self):
+        # 三条很长的旧摘要吃掉预算，最近的三天各自很短
+        for m in ("2026-05", "2026-06", "2026-07"):
+            with open(os.path.join(recap_store.ROLLUP_DIR, m + ".md"),
+                      "w", encoding="utf-8") as f:
+                f.write("旧事" * 400)
+        self._day(2, "前天。")
+        self._day(1, "昨天。")
+        self._day(0, "今天。")
+
+        out = recap_store.block(cap=600)
+        got = "".join(self._lines(out))
+        for word in ("今天", "昨天", "前天"):
+            self.assertIn(word, got, "最近的%s被丢了" % word)
+
+    def test_超限的条目被跳过而不是挡住后面的(self):
+        # 中间一条巨长，预算只够再带一条短的
+        self._day(2, "前天" + "啊" * 900 + "。")
+        self._day(1, "短。")
+        self._day(0, "今天。")
+
+        out = recap_store.block(cap=200)
+        lines = self._lines(out)
+        self.assertLessEqual(len(out), 200 + 200, "超了预算")
+        self.assertTrue(any("今天" in l for l in lines))
+
+    def test_时间正序输出(self):
+        # 挑的顺序变了，展示顺序不能变 —— 模型对"最近的在最后"更敏感
+        self._day(2, "前天。")
+        self._day(1, "昨天。")
+        self._day(0, "今天。")
+        out = recap_store.block()
+        self.assertLess(out.index("前天"), out.index("昨天"))
+        self.assertLess(out.index("昨天"), out.index("今天"))
+
+    def test_一条都放不下就返回空(self):
+        self._day(0, "啊" * 3000)
+        self.assertEqual(recap_store.block(cap=100), "")
 
 
 if __name__ == "__main__":
