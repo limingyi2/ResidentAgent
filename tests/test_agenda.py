@@ -69,7 +69,7 @@ class TestParseDate(unittest.TestCase):
 
     def test_bare_day_number(self):
         self.assertEqual(agenda.parse_date("28号放假", self.BASE),
-                         datetime.date(2026, 9, 25))
+                         datetime.date(2026, 9, 28))
 
     def test_unparseable_returns_none(self):
         """宁可漏、不可猜：解析不出来就不进账本（猜错比没有更糟）。"""
