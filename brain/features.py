@@ -21,6 +21,7 @@ DEFAULTS = {
     "packages": True,         # 快递监控与提醒
     "rand_img_chat": True,    # 聊天里她可以甩 [rand:] 图
     "rand_img_moment": True,  # 朋友圈配图优先用随机图
+    "tools": True,            # 模型可自选调免费 API（查他在哪/天气/快递）
 }
 
 _cache = {"t": 0.0, "d": dict(DEFAULTS)}

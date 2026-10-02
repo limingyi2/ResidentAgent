@@ -53,9 +53,10 @@ if not isinstance(MOB_CFG, dict):
 BRAIN_TOKEN = str(api_config.get("brain_token") or MOB_CFG.get("token") or "")
 
 # 白名单式浅拷贝：这里漏掉哪个键，对应模块就读到空配置、改了也不生效
-# （vision 与 voice 各栽过一次）。往 config 加新功能段时记得同步这里
+# （vision 与 voice 各栽过一次，uapi 也一直漏着 —— 所有 UAPI 调用都没带上 token）。
+# 往 config 加新功能段时记得同步这里
 API_CFG = {k: api_config[k] for k in
-           ("api_base", "api_key", "model", "vision", "voice")
+           ("api_base", "api_key", "model", "vision", "voice", "uapi")
            if k in api_config}
 
 

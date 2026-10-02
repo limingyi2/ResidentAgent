@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""UAPI（uapis.cn）的两个 GET：实时天气 + 节假日万年历。
+"""UAPI（uapis.cn）的几个 GET：天气 / 节假日 / 热榜 / 快递 / IP归属地 / 随机图。
 
-设计约束：聊天主链路**绝不依赖**它 —— 超时 3 秒、任何失败返回 None，
+设计约束：聊天主链路**绝不依赖**它 —— 超时 6 秒、任何失败返回 None，
 调用方拿不到就当没这个数据。token 在 config.json 的 uapi.token
 （该文件已 gitignore，仓库是公开的，key 不能进仓库）。
 认证是 query 参数 ?token=（实测 header Bearer 不认）。
@@ -13,11 +13,19 @@ import urllib.request
 _BASE = "https://uapis.cn/api/v1"
 
 
-def _get(path, params, token, timeout=3):
+def _get(path, params, token, timeout=6):
+    """两次机会：UAPI 对背靠背调用偶发拖死连接（实测约 1/5 概率，
+    紧接着重发一次 0.1 秒就回），都失败才把异常抛给上层转 None。"""
     url = _BASE + path + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url + "&token=" + urllib.parse.quote(token))
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    last = None
+    for _ in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            last = e
+    raise last
 
 
 def fetch_weather(city, token):

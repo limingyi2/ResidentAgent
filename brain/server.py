@@ -108,6 +108,29 @@ def build_local_brain(verbose=True):
     return b
 
 
+def _chat_with_tools(text, img_path):
+    """聊一轮，带模型自选工具：她写了 [tool:名] 就执行并喂回结果让她重答。
+
+    开关 tools 关了就走普通聊天。锁在每轮 chat 里拿 —— 工具查询本身不碰
+    大脑，别抱着锁去等 UAPI 的网络超时。
+    """
+    def _once(t):
+        with _LOCAL["lock"]:
+            return _LOCAL["brain"].chat(t, img=img_path, log=False)
+
+    try:
+        import features as _feat
+        if not _feat.on("tools"):
+            return _once(text)
+    except Exception:
+        pass
+    import tools as _tools
+    ans, mode, used = _tools.run_chat_with_tools(_once, text)
+    if used:
+        print(f"[大脑] 她调用了工具 {used}", flush=True)
+    return ans, mode
+
+
 def ask_with_retry(text, img_b64=None, display=None):
     """让她回一句话。
 
@@ -161,8 +184,7 @@ def ask_with_retry(text, img_b64=None, display=None):
             except Exception as e:
                 print(f"[大脑] 自拍生成失败，回退正常对话：{e}", flush=True)
             with _LOCAL["lock"]:
-                ans, mode = _LOCAL["brain"].chat(text, img=img_path or None,
-                                                 log=False)
+                ans, mode = _chat_with_tools(text, img_path or None)
             # 剥掉万一学出来的「说」标记；[gen:xxx] 现场生成真图换成 [img:名字]
             look = _her_look()
             ans = resolve_gen_tags(strip_say_marker(ans), look)
