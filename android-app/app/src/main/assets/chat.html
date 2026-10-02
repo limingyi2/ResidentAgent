@@ -631,6 +631,11 @@ function renderAv(role, el) {
   } else { const im = new Image(); im.src = herAv(); el.appendChild(im); }
 }
 function addMsg(role, text, t, myImgB64, imgIsB64) {
+  // 每次新建都从空集开始。之前只在 addTracked 里重置，走聊天主链路（sendMsg /
+  // sendText 直接调 addMsg）时不重置，上一条消息的 DOM 会残留进 _newNodes，
+  // 被 optEls 当成本轮乐观气泡摘掉 —— 而 updateHistory 的增量比对认为那条消息
+  // 还在，不会补画，于是每发一条新消息，上一轮她最后说的那条就凭空消失。
+  _newNodes = [];
   const d = t || '';
   if (d) {
     // 跨天、或距上一条超过 5 分钟就插一条时间分隔（像微信）；只按天插的话连聊几十条都看不到时间。
@@ -893,7 +898,7 @@ function keyOf(it) {
   return (it.t || '') + '|' + (it.role || '') + '|' + (it.text || '') + '|' + (it.img || '');
 }
 function addTracked(it) {
-  _newNodes = [];
+  _newNodes = [];                      // addMsg 自己也会重置，这行只为表意
   addMsg(it.role === 'user' ? 'user' : 'assistant', it.text, it.t,
          it.role === 'user' ? (it.img || '') : '', false);
   return { key: keyOf(it), els: _newNodes.slice() };

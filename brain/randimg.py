@@ -6,9 +6,14 @@ import time
 import random
 
 RAND_TAG_RE = re.compile(r"\[rand[:：]\s*([^\]]+?)\s*\]")
-# 她能主动甩的分类。furry 图库存在但永远不发（用户明令屏蔽）；
-# 壁纸类只在他点名"壁纸"时才给
-_RAND_OK = ("bq", "acg", "landscape", "anime", "general_anime", "ai_drawing")
+# 只挡明确不许发的，其余一律放行 —— 接口给什么就发什么。
+# 早先这里是份正向白名单（只有 6 个分类），模型选错一个就把标签静默删掉，
+# 她那边成了"啥也没发"。而她手上没有菜单以外的任何信息，选错是必然的。
+# 现在改成黑名单：她看到的分类说明（persona_store.py）就是接口真有的，
+# 提示词加一类不用回来改这里。
+# furry 图库真实存在（实测 302），用户明令屏蔽，必须留在挡的这边。
+_RAND_BLOCK = ("furry",)
+# 壁纸只在他点名"壁纸"时才给 —— 他不说就是不要
 _RAND_WALLPAPER = ("pc_wallpaper", "mobile_wallpaper")
 
 
@@ -49,10 +54,9 @@ def resolve_rand_tags(text, user_text=""):
 
     def _sub(m):
         cat = (m.group(1) or "").strip().lower()
-        if cat in _RAND_WALLPAPER:
-            if "壁纸" not in (user_text or ""):
-                return ""
-        elif cat not in _RAND_OK:
+        if cat in _RAND_BLOCK:
+            return ""
+        if cat in _RAND_WALLPAPER and "壁纸" not in (user_text or ""):
             return ""
         try:
             import features
@@ -64,8 +68,7 @@ def resolve_rand_tags(text, user_text=""):
         if n:
             return "[img:%s]" % n
         # 拉不到图时不能只把标签删干净。正文原样发出去用户看到的就是
-        # "她啥也没发"，分不清是她不想发还是图库没响应。分类不在册/开关关掉的
-        # 情况仍静默删标签 —— 那不是故障，说出来像在找借口
+        # "她啥也没发"，分不清是她不想发还是图库没响应。被屏蔽的分类才静默删。
         return "\n（图库没响应，没发出去）"
     out = RAND_TAG_RE.sub(_sub, text)
 

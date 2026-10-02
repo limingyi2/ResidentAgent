@@ -31,28 +31,6 @@ _SELFIE_MISS = ("手边", "窗外的", "风景", "你那边的", "什么东西",
                 "课本", "教材", "论文", "代码", "文档", "文件夹", "资料",
                 "成绩单", "计划", "日程", "壁纸", "桌面")
 
-# 按需换装（他要看睡衣 / 泳装就照点名换）已停用：不要"按需服务"的感觉，
-# 她穿什么只跟时间、地点、在干什么有关。要恢复就把下面两处判断放回来
-_OUTFIT_KEYS = ("睡衣", "泳装", "泳衣", "比基尼")
-_OUTFIT_OVERRIDE_ENABLED = False
-
-
-def _outfit_override(text):
-    """已停用：固定返回 None（按时段/场合的正常衣柜）。"""
-    if not _OUTFIT_OVERRIDE_ENABLED:
-        return None
-    t = text or ""
-    if ("泳" in t) or ("比基尼" in t):
-        return random.choice([
-            "白色分体比基尼泳装", "深蓝色连体泳衣",
-            "浅粉色荷叶边比基尼", "黑色简约分体泳装"])
-    if "睡衣" in t:
-        return random.choice([
-            "浅粉色纯棉长袖睡衣套装", "淡蓝色格子睡衣",
-            "奶白色宽松长袖家居裙", "米色毛绒家居服"])
-    return None
-
-
 # "要东西"的正则兜底：紧挨着"你"出现的这些词一律是要东西不是要人。
 # 允许中间夹两三个字，"你那篇日记"这种换种说法也挡得住
 _SELFIE_THING_RE = re.compile(
@@ -79,9 +57,6 @@ def _looks_like_selfie(text):
         return False
     # 闸门 2：明确指向她本人
     if any(h in t for h in _SELFIE_STRONG):
-        return True
-    # 点名要睡衣 / 泳装这类照片已停用：不再因为对方点名就直接出图
-    if _OUTFIT_OVERRIDE_ENABLED and any(k in t for k in _OUTFIT_KEYS):
         return True
     # “发/拍/来 + 照片/图 + 你”这类（“你能发张照片吗”）
     if "你" in t and ("照片" in t or "图" in t) and any(
@@ -192,7 +167,7 @@ def _selfie_prompt(wear_override=None):
             opts = [("二食堂", "刚吃完午饭"),
                     ("宿舍", "午休前窝在椅子上")]
         elif hm < 17 * 60 + 40:
-            opts = [("图书馆三楼自习区", "在啃专业课的复习资料"),
+            opts = [("自习室", "在啃专业课的复习资料"),
                     ("宿舍书桌前", "摊着一桌资料复习"),
                     ("空教室", "一个人自习中")]
         elif hm < 19 * 60:

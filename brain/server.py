@@ -35,7 +35,7 @@ except Exception:
 from reply import strip_say_marker, resolve_voice_tag, resolve_gen_tags
 from randimg import resolve_rand_tags, RAND_TAG_RE, _cloud_random_image
 from selfie import (_SELFIE_STRONG, _SELFIE_MISS, _SELFIE_THING_RE,
-                    _outfit_override, _looks_like_selfie, _hour_seg,
+                    _looks_like_selfie, _hour_seg,
                     _wear_for, _selfie_prompt, _selfie_caption)
 from imggen import (GEN_NEGATIVE, _cloud_gen_image, _cloud_gen_selfie,
                     _cloud_sticker, _her_look, _look_ref_path, _look_ref_uri,
@@ -55,7 +55,7 @@ __all__ = [
     "api_config", "API_CFG", "MOB_CFG", "BRAIN_TOKEN", "load_config",
     "strip_say_marker", "resolve_voice_tag", "resolve_gen_tags",
     "resolve_rand_tags", "RAND_TAG_RE", "_cloud_random_image",
-    "_SELFIE_STRONG", "_SELFIE_MISS", "_SELFIE_THING_RE", "_outfit_override",
+    "_SELFIE_STRONG", "_SELFIE_MISS", "_SELFIE_THING_RE",
     "_looks_like_selfie", "_hour_seg", "_wear_for", "_selfie_prompt",
     "_selfie_caption", "GEN_NEGATIVE", "_cloud_gen_image", "_cloud_gen_selfie",
     "_cloud_sticker", "_her_look", "_look_ref_path", "_look_ref_uri",
@@ -267,7 +267,7 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
             # 现场生成一张，正文用第一人称短句
             try:
                 if not img_b64 and _looks_like_selfie(text):
-                    sp, place = _selfie_prompt(wear_override=_outfit_override(text))
+                    sp, place = _selfie_prompt()
                     name = _cloud_gen_selfie(sp, negative_prompt=GEN_NEGATIVE,
                                              size="768x1024")
                     if name:
