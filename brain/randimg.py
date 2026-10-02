@@ -60,4 +60,6 @@ def resolve_rand_tags(text, user_text=""):
     out = RAND_TAG_RE.sub(_sub, (text or ""))
     # 兜底：任何形态的 rand 残留（怪变体、半截标签）一律整段删掉，
     # 存档里漏一个原样标签，App 就是 404 裂图（03:43 那次"图片消失"的根源）
-    return re.sub(r"\[(?:img[:：]\s*)?rand[^]]*\]", "", out, flags=re.IGNORECASE)
+    out = re.sub(r"\[(?:img[:：]\s*)?rand[^]]*\]", "", out, flags=re.IGNORECASE)
+    # 删完标签留下的连续空格收成一格，行首尾的空白直接去掉
+    return re.sub(r" {2,}", " ", out).strip()

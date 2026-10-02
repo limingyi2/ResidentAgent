@@ -121,7 +121,11 @@ def _chat_with_tools(text, img_path):
     try:
         import features as _feat
         if not _feat.on("tools"):
-            return _once(text)
+            # 开关关了不执行查询，但人设里的工具规则还在（prompt 是拼好的），
+            # 模型仍可能写标签 —— 照样清扫，绝不能漏给用户
+            import tools as _tools
+            ans, mode = _once(text)
+            return _tools.TOOL_TAG_RE.sub("", ans).strip(), mode
     except Exception:
         pass
     import tools as _tools
@@ -183,8 +187,9 @@ def ask_with_retry(text, img_b64=None, display=None):
                         return ans, "本地自拍", ""
             except Exception as e:
                 print(f"[大脑] 自拍生成失败，回退正常对话：{e}", flush=True)
-            with _LOCAL["lock"]:
-                ans, mode = _chat_with_tools(text, img_path or None)
+            # 锁在 _chat_with_tools 的每轮 chat 里拿：工具查询/二轮模型调用
+            # 都不该抱着锁等网络，否则她的主动搭话会被这条消息堵住
+            ans, mode = _chat_with_tools(text, img_path or None)
             # 剥掉万一学出来的「说」标记；[gen:xxx] 现场生成真图换成 [img:名字]
             look = _her_look()
             ans = resolve_gen_tags(strip_say_marker(ans), look)
