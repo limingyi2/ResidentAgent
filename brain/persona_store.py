@@ -86,14 +86,23 @@ CORE_RULES = (
 
 
 def key_from_config(api_config):
-    """从 config.json 里取当前人设的文件名（不含扩展名）。"""
-    p = (api_config or {}).get("persona_file") or ""
+    """从 config.json 里取当前人设的文件名（不含扩展名）。
+
+    `persona_file` 来自配置，而配置可能是**在 Windows 上写的、在 Linux 上跑**
+    （本项目云端就是 Windows，但仓库公开后谁都能在 Linux 上 clone 跑）。
+    `os.path.basename` 是平台相关的：在 Linux 上 `C:\\dir\\x.json` 原样返回，
+    于是拼出来的路径会跳出 PERSONA_DIR —— 路径过滤等于没有。
+    所以这里两种分隔符都自己处理，不依赖 os.path。
+    """
+    p = str((api_config or {}).get("persona_file") or "").strip()
     if not p:
         return DEFAULT_KEY
-    key = os.path.basename(p)
-    if key.endswith(".json"):
-        key = key[:-5]
-    return key or DEFAULT_KEY
+    for sep in ("\\", "/"):
+        if sep in p:
+            p = p.rsplit(sep, 1)[-1]
+    if p.lower().endswith(".json"):
+        p = p[:-5]
+    return p.strip() or DEFAULT_KEY
 
 
 def path_of(key):

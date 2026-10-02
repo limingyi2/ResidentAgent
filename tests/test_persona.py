@@ -160,6 +160,22 @@ class TestKeyFromConfig(unittest.TestCase):
             persona_store.key_from_config(
                 {"persona_file": "C:\\some\\dir\\y.json"}), "y")
 
+    def test_windows_path_works_on_any_platform(self):
+        """反斜杠必须自己处理 —— os.path.basename 是平台相关的。
+
+        这条是 CI 在 Linux 上抓出来的：原来用 os.path.basename，在 Linux 上
+        `C:\\some\\dir\\y.json` 会**原样返回**（因为 Linux 只认 /），
+        于是拼出的路径直接跳出 PERSONA_DIR，路径过滤等于没做。
+        本地 Windows 全绿、线上 Linux 挂 —— 典型的"只在一半环境里测过"。
+        """
+        for p in ("C:\\some\\dir\\y.json", "D:/data/personas/z.json",
+                  "\\\\server\\share\\w.json", "plain.json"):
+            key = persona_store.key_from_config({"persona_file": p})
+            self.assertNotIn("\\", key, p)
+            self.assertNotIn("/", key, p)
+            self.assertNotIn(":", key, p)
+            self.assertTrue(key.endswith(("y", "z", "w", "plain")), p)
+
     def test_empty_config_falls_back_to_default_key(self):
         for cfg in ({}, {"persona_file": ""}, None):
             self.assertEqual(persona_store.key_from_config(cfg),
@@ -167,11 +183,14 @@ class TestKeyFromConfig(unittest.TestCase):
 
     def test_path_traversal_is_neutralised(self):
         """persona_file 来自配置，basename 之后不该还能跳出 personas/。"""
-        key = persona_store.key_from_config(
-            {"persona_file": "../../../../etc/passwd"})
-        self.assertNotIn("..", key)
-        self.assertNotIn("/", key)
-        self.assertNotIn("\\", key)
+        for raw in ("../../../../etc/passwd",
+                    "..\\..\\..\\Windows\\System32\\drivers\\etc\\hosts",
+                    "C:\\Windows\\System32\\config\\SAM"):
+            key = persona_store.key_from_config({"persona_file": raw})
+            self.assertNotIn("..", key, raw)
+            self.assertNotIn("/", key, raw)
+            self.assertNotIn("\\", key, raw)
+            self.assertNotIn(":", key, raw)
 
 
 if __name__ == "__main__":
