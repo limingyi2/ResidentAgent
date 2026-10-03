@@ -6,7 +6,9 @@
 
 字段（设置窗口里都能改）：name 名字 / nicknames 小名 / background 她是谁与过去 /
 scene 现在的关系处境 / personality 性格与说话方式 / call_user 她怎么称呼你 /
-notes 创作者备注（给 AI 的内部指令，原样拼进系统提示）。
+relation 她和他的关系（自由文本）/ notes 创作者备注（给 AI 的内部指令，原样拼进系统提示）/
+appearance 外貌描述。
+label/desc 只给人设列表显示用，不参与 build_system_text。
 """
 import os
 import json
@@ -33,6 +35,7 @@ DEFAULT_PERSONA = {
     "scene": "",
     "personality": "",
     "call_user": "",
+    "relation": "",
     "notes": "",
     "appearance": "",
     # 列表显示用，不参与 build_system_text（那里只拼 name/背景/性格/notes）

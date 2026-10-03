@@ -83,14 +83,14 @@ def resolve_voice_tag(text, api_config):
 def resolve_gen_tags(text, look=""):
     """把回复里单独成行的 [gen:描述] 真的生成一张图，替换成 [img:文件名]。
 
-    look 是她的外貌描述（人设 appearance），拼在提示词最前面保证自拍长相稳定。
-    生成失败就把标签整行删掉，不让标签原文发出去
+    走 _cloud_gen_selfie()：用当前人设的参考图锁脸，生成的是"当前角色本人"的图。
+    look 参数保留为向后兼容（旧调用方会传外貌描述），但不再拼进提示词 ——
+    锁脸靠参考图，提示词里写长相反而会让模型偏离参考图。
+    生成失败就把标签整行删掉，不让标签原文发出去。
     """
     def _sub(m):
         prompt = m.group(1).strip()
-        if look:
-            prompt = look + "，" + prompt
         import imggen
-        n = imggen._cloud_gen_image(prompt)
+        n = imggen._cloud_gen_selfie(prompt)
         return ("[img:%s]" % n) if n else ""
     return GEN_TAG_RE.sub(_sub, (text or ""))
