@@ -70,6 +70,15 @@ _VOICE_CACHE = {}
 #
 # 每条必须带 provider/model：apply() 会把它们和 voice 一起写进 config，切换不再依赖
 # 散落各处的默认值；硅基的 key 一律加 sf_ 前缀，避免和阿里撞名（by_key 是按 key 查的）。
+#
+# 🔴 instruction 只写**情绪词**，不要写怎么演。
+# TTS 会字面执行技巧描述 —— 写"尾音往下掉、停顿长一点"，它就真给拖长音压低尾音，
+# 语速一慢人就显老。实测同一句「刚下课，累死了」（6 个字）：
+#   "犯困，尾音往下掉，句子之间停顿长一点" → 9.5 秒
+#   不给指令                                → 7.3 秒
+#   "犯困"                                  → 5.0 秒
+# 同一个情绪，最长和最短差将近一倍，八旬老奶的听感就是这么来的。
+# 音色本身没问题：换四条音色配"犯困"，时长差在 6.8~7.4 秒之间。
 VOICE_CATALOG = [
     # --- 兜底：旧平台的预置嗓，阿里全线故障时一键切回，代价是 24kHz 的合成味 ---
     {"key": "sf_diana", "label": "预置 · 欢快女声（旧平台）", "group": "兜底",
@@ -81,38 +90,38 @@ VOICE_CATALOG = [
     {"key": "zv_piper", "label": "绝区零 · 派派", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "zvpiper",
      "voice": "qwen-audio-3.1-tts-flash-zvpiper-246bc40bf08d47699b80bf7ac23f7e6b",
-     "instruction": "慵懒犯困，尾音往下掉，句子之间停顿长一点",
+     "instruction": "犯困",
      "desc": "慵懒、尾音往下掉，适合她犯困或撒娇"},
     {"key": "gs_xiangling", "label": "原神 · 香菱", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "gsxiangl",
      "voice": "qwen-audio-3.1-tts-flash-gsxiangl-a2a7b35d78884d13ac6336778a8a4c41",
-     "instruction": "元气，语速偏快，语气上扬，像刚想到什么急着说",
+     "instruction": "兴奋",
      "desc": "亮、脆、语速偏快，元气路线"},
     {"key": "zv_cecilia", "label": "绝区零 · Cecilia", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "zvcecili",
      "voice": "qwen-audio-3.1-tts-flash-zvcecili-c94de5e639894890bcbf6723498d77c8",
-     "instruction": "偏冷静，咬字清楚，音量不大，像在旁边平静地说",
+     "instruction": "平静",
      "desc": "偏冷、咬字清楚，安静说话时最好听"},
     {"key": "gs_barbara", "label": "原神 · 芭芭拉", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "gsbarbar",
      "voice": "qwen-audio-3.1-tts-flash-gsbarbar-0f68a5df77f449aea257986f3b632fec",
-     "instruction": "甜美轻快，语气软一点，不要太用力",
+     "instruction": "开心",
      "desc": "甜美偏亮；参考音频当年做过 24kHz 无损转换"},
     {"key": "gs_ganyu", "label": "原神 · 甘雨", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "gsganyu",
      "voice": "qwen-audio-3.1-tts-flash-gsganyu-7ef9ebe5858c4668bc01434ca2293754",
-     "instruction": "温柔偏低，不着急，长句子读稳一点",
+     "instruction": "温和",
      "desc": "温柔偏低，长句子最稳"},
 
     {"key": "moning_01", "label": "莫宁", "group": "你自己录的",
      "provider": "aliyun", "model": ALI_MODEL, "name": "moning",
      "voice": "qwen-audio-3.1-tts-flash-moning-b17d12e4e1544238933058b067824d95",
-     "instruction": "语气随意，像跟熟人发消息，不用刻意，语速自然",
+     "instruction": "随口一说",
      "desc": "人味最足，长句子也稳；2026-10-01 重录版（电平比初版好）"},
     {"key": "jiabeilina_v2", "label": "嘉贝莉娜", "group": "你自己录的",
      "provider": "aliyun", "model": ALI_MODEL, "name": "jblina",
      "voice": "qwen-audio-3.1-tts-flash-jblina-24bdbe99164b459f99d3b2da87157214",
-     "instruction": "声音压低一点，语速慢半拍，语气淡淡的",
+     "instruction": "淡淡的",
      "desc": "音色偏暗偏低，反差感强"},
 ]
 

@@ -134,6 +134,43 @@ class TestCatalogHasBaseline(unittest.TestCase):
         self.assertEqual((sub.get("aliyun") or {}).get("api_key"), "sk-test")
 
 
+class TestNoTechniqueInInstruction(unittest.TestCase):
+    """instruction 只能写情绪，不能写怎么念。
+
+    这是踩过的：基线写的是"犯困，尾音往下掉，句子之间停顿长一点"，
+    TTS 字面执行了这些技巧，语速一慢人显老 —— 听着像八旬老奶。
+    实测同一句 6 个字："技巧版"9.5 秒 / 不给指令 7.3 秒 / 只写"犯困"5.0 秒。
+    """
+
+    # 这些词一出现，就是在描述演绎技巧而不是情绪
+    TRICK_WORDS = ("尾音", "停顿", "拖长", "语速", "放慢", "拉长", "上扬",
+                   "压低", "咬字", "音量", "停顿长", "慢半拍", "读稳")
+
+    def test_catalog_instructions_have_no_technique_words(self):
+        bad = []
+        for it in voice.VOICE_CATALOG:
+            instr = (it.get("instruction") or "")
+            for w in self.TRICK_WORDS:
+                if w in instr:
+                    bad.append("%s: %s" % (it["key"], instr))
+        self.assertEqual(bad, [], "instruction 里写了技巧描述：%s" % bad)
+
+    def test_catalog_instructions_are_short(self):
+        """情绪词就该是短的。一长串就说明又在描述怎么演。"""
+        for it in voice.VOICE_CATALOG:
+            if it.get("provider") != "aliyun":
+                continue
+            self.assertLessEqual(
+                len(it.get("instruction") or ""), 8,
+                "%s 的 instruction 过长 —— 该只留情绪词" % it["key"])
+
+    def test_prompt_warns_against_technique_words(self):
+        """她自己也可能写"语速慢一点"，提示词得明确禁掉。"""
+        import persona_store
+        rules = persona_store.build_draft_rules({})
+        self.assertIn("别写怎么念", rules)
+
+
 class TestDraftRulesTeachesMood(unittest.TestCase):
     """她得知道有这个选项，否则永远不标，白改。"""
 
