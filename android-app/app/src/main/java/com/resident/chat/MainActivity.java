@@ -28,6 +28,11 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> filePathCallback;
     private static final int REQ_PICK = 1001;
 
+    /** 存图目录。saveImage 往这里写、deleteImage 按这里查，
+     *  必须是同一个字符串 —— 分开放两处字面量，改一个漏一个就变成
+     *  "存得进、删不掉"（MediaStore 的 delete 是按目录精确匹配的）。 */
+    private static final String ALBUM_DIR = "Pictures/Vigil";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -52,7 +57,7 @@ public class MainActivity extends Activity {
         // file:// 源下混合内容策略本来不生效。留着是为了将来换 WebViewAssetLoader
         // （https 源）时记得改成 COMPATIBILITY_MODE
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " ZhixiaChat/1.0");
+        s.setUserAgentString(s.getUserAgentString() + " Vigil/1.0");
 
         web.addJavascriptInterface(new JsBridge(), "Android");
         web.setWebViewClient(new android.webkit.WebViewClient());
@@ -312,7 +317,7 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        /** 表情包/图片保存：存进相册「知夏图片」目录。图片字节由页面传 base64 过来。
+        /** 表情包/图片保存：存进相册「Vigil」目录。图片字节由页面传base64 过来。
          * Android 10+ 走 MediaStore 免权限；老机器退到 App 私有目录。 */
         @JavascriptInterface
         public void saveImage(String name, String b64) {
@@ -326,7 +331,7 @@ public class MainActivity extends Activity {
                     android.content.ContentValues cv = new android.content.ContentValues();
                     cv.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, n);
                     cv.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-                    cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/知夏图片");
+                    cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, ALBUM_DIR);
                     cv.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
                     Uri uri = getContentResolver().insert(
                             android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
@@ -339,7 +344,7 @@ public class MainActivity extends Activity {
                     cv.clear();
                     cv.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
                     getContentResolver().update(uri, cv, null, null);
-                    msg = "已保存到相册「知夏图片」";
+                    msg = "已保存到相册「Vigil」";
                 } else {
                     File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
                     if (dir != null && !dir.exists()) dir.mkdirs();
@@ -368,9 +373,14 @@ public class MainActivity extends Activity {
                 if (Build.VERSION.SDK_INT >= 29) {
                     String sel = android.provider.MediaStore.Images.Media.DISPLAY_NAME
                             + "=? AND " + android.provider.MediaStore.Images.Media.RELATIVE_PATH + "=?";
-                    int k = getContentResolver().delete(
-                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                            sel, new String[]{n, "Pictures/知夏图片/"});
+                    int k = 0;
+                    for (String dir : new String[]{ALBUM_DIR, "Pictures/知夏图片", "Pictures/知夏"}) {
+                        int r = getContentResolver().delete(
+                                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                sel, new String[]{n, dir + "/"});
+                        if (r > 0) k += r;
+                        if (k > 0) break;
+                    }
                     msg = k > 0 ? "已删除：" + n : "相册里没找到这张（可能已经删了）";
                 } else {
                     File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);

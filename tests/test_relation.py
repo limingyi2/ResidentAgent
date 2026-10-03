@@ -193,5 +193,69 @@ class TestFrontendEditor(unittest.TestCase):
         self.assertIn("/api/persona/full", self.src)
 
 
+class TestSaveKeepsUnsentFields(unittest.TestCase):
+    """App 编辑器只发 9 个字段，save 不能把其余的清掉。
+
+    label/desc 是列表元数据，编辑器里没有这两栏（用户不该看见它们），
+    所以前端永远不会传。原先 save 一律 data.get(k, DEFAULT_PERSONA[k]) 兜底，
+    在 App 里保存一次就把它们清成空串，列表里的副标题跟着没了。
+    """
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.orig = ps.PERSONA_DIR
+        ps.PERSONA_DIR = self.tmp
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(setattr, ps, "PERSONA_DIR", self.orig)
+
+    def test_label_desc_survive_a_save(self):
+        ps.save({"name": "她", "label": "原版 · 老朋友",
+                 "desc": "顺手跟你说两句"}, "k")
+        ps.save({"name": "她", "relation": "同居两年"}, "k")
+        import json
+        d = json.load(open(ps.path_of("k"), encoding="utf-8"))
+        self.assertEqual(d["label"], "原版 · 老朋友")
+        self.assertEqual(d["desc"], "顺手跟你说两句")
+        self.assertEqual(d["relation"], "同居两年")
+
+    def test_empty_string_still_clears(self):
+        """传了空串是用户主动清空，要照写 —— 跟"没传"不是一回事。"""
+        ps.save({"name": "她", "label": "有值"}, "k")
+        ps.save({"name": "她", "label": ""}, "k")
+        import json
+        d = json.load(open(ps.path_of("k"), encoding="utf-8"))
+        self.assertEqual(d["label"], "")
+
+    def test_missing_file_falls_back_to_defaults(self):
+        """文件不存在时不能炸，缺的字段用默认。"""
+        ps.save({"name": "她"}, "new")
+        import json
+        d = json.load(open(ps.path_of("new"), encoding="utf-8"))
+        self.assertEqual(d["name"], "她")
+        self.assertIn("relation", d)
+
+
+class TestDraftRulesNotBindingRelation(unittest.TestCase):
+    """draft_rules 每轮必发，权重比人设字段高 —— 里面不能焊死关系形态"""
+
+    def setUp(self):
+        self.rules = ps.build_draft_rules({"call_user": ""})
+
+    def test_no_hardcoded_long_distance(self):
+        """关系改成自由文本了，"异地"这种前提不该还写在必发的规则里。"""
+        self.assertNotIn("重要：异地", self.rules)
+
+    def test_still_guards_unexpected_meeting_promises(self):
+        """不能见面时别随口承诺，但这条得保留（换个说法）。"""
+        for frag in ("我陪你", "能不能见面"):
+            self.assertIn(frag, self.rules)
+
+    def test_still_blocks_faking_sees_his_room(self):
+        """删"异地"那句时别把这条一起带走 —— 它跟异地无关。"""
+        self.assertIn("假装看得见他身边", self.rules)
+
+
 if __name__ == "__main__":
     unittest.main()

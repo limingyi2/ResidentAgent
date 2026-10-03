@@ -284,8 +284,8 @@ class Brain:
     def reload_persona(self, keep_history=True):
         """重新读取人设（设置窗口保存后调用，热更新，不用重启）。
 
-        关系档（friend/partner）从 config.json 读，跟着人设一起重载 ——
-        两者是独立的两个维度，切关系不该要求重启。
+        关系定位跟着人设一起重载 —— 它现在是 persona["relation"] 里的自由文本，
+        不是 config 里的档位，所以不单独读。
         """
         self.persona = load_persona(key_from_config(self.api))
         self.persona_text = build_system_text(self.persona)

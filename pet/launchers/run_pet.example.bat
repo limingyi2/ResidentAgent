@@ -19,9 +19,9 @@ rem 1) tunnel: local 18787 -> cloud 8788. Skip if already listening,
 rem    so watchdog launches and double-clicks don't stack ssh processes.
 netstat -ano | findstr "127.0.0.1:18787" | findstr "LISTENING" >nul
 if errorlevel 1 (
-  start "LinZhixia Tunnel" /min ssh -i "%SSH_KEY%" -N -L 18787:127.0.0.1:8788 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no %CLOUD_USER%@%CLOUD_HOST%
+  start "Vigil Tunnel" /min ssh -i "%SSH_KEY%" -N -L 18787:127.0.0.1:8788 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no %CLOUD_USER%@%CLOUD_HOST%
   timeout /t 4 /nobreak >nul
 )
 
 rem 2) local pet shell (portrait, bubbles, chat window, activity watcher)
-start "LinZhixia Pet" "%PYTHONW%" "%PROJECT_DIR%\pet\pet.py"
+start "Vigil Pet" "%PYTHONW%" "%PROJECT_DIR%\pet\pet.py"

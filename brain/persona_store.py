@@ -43,17 +43,15 @@ FIELDS = ["name", "nicknames", "background", "scene", "personality",
           "label", "desc"]
 
 # ============================================================================
-# 关系定位 —— 她跟"他"是什么关系。这一层独立于性格：7 套性格（元气/沉稳/寡言/
-# 温和/嘴硬/清冷）只管说话语气，关系是另一回事。原版是"认识很多年的朋友"，
-# 切成 partner 就是恋人 —— 两者语气可以任意组合，不用为此多存一套人设。
+# 关系定位 —— 她跟"他"是什么关系。
 #
-# 抽出来而不是留在 CORE_RULES 里，是因为 CORE_RULES 末尾权重最高
-# （build_system_text 里固定缀在最后），把"不是恋人"写死在那个位置，
-# 人设文件里再怎么写"我们是情侣"也压不过它。
+# 放在人设里而不是 config.json：关系是"她是谁"的一部分，换人设时一起换。
+# 原来是 friend/partner 两档枚举，已删——"十年老友""正在追她""同居"都不在里头，
+# 枚举永远补不完。现在是 persona["relation"] 一段自由文本，App 里直接编辑。
+#
+# 不塞进 CORE_RULES 也有原因：CORE_RULES 末尾权重最高（build_system_text 里
+# 固定缀在最后），写在那儿等于焊死，人设文件里再怎么写相反的话都压不过它。
 # ============================================================================
-# 关系定位不是两档，是你自己写的一段话。原来写死 friend/partner 二选一，
-# 但"朋友"和"伴侣"之间显然还有很多种（十年老友、正在追她、同居），
-# 枚举永远补不完。现在放进 persona["relation"]，App 里直接编辑。
 
 # 留空时的兜底。选"退回一句默认"而不是"真留空"：误操作清空这一栏时有个
 # 兜底比没兜底安全 —— 这跟原来两档"认错时静默退回 friend"是同一个思路。
@@ -62,12 +60,7 @@ DEFAULT_RELATION = "你和他是认识很久的朋友，各自城市，关系好
 
 
 def relation_of(persona):
-    """从人设里读关系定位。空值退回默认。
-
-    为什么不放 config.json：关系是"她是谁"的一部分，不是运行配置。
-    放人设里跟其他字段同进同出，换人设时一起换 —— 这正是拆掉两档的意义，
-    一处真源。
-    """
+    """从人设里读关系定位，空值退回默认。返回原样，不做归一化。"""
     r = (persona or {}).get("relation")
     if isinstance(r, str) and r.strip():
         return r.strip()
@@ -197,19 +190,39 @@ def load(key=None):
 
 
 def save(data, key):
-    """保存一套人设（只保留 FIELDS 里的字段）。"""
+    """保存一套人设（只保留 FIELDS 里的字段）。
+
+    data 里没有的键沿用文件里原来的值，不是清成默认。
+    label/desc 是列表元数据，App 的人设编辑器里没有这两栏（用户不该看见它们），
+    前端不会传 —— 原先一律 data.get(k, DEFAULT_PERSONA[k]) 兜底，
+    在 App 里保存一次就把它们清空了，列表里的副标题跟着没。
+    区分"键没传"和"传了空串"：前者沿用旧值，后者是用户主动清空，照写。
+    """
     os.makedirs(PERSONA_DIR, exist_ok=True)
-    clean = {k: data.get(k, DEFAULT_PERSONA.get(k)) for k in FIELDS}
-    with open(path_of(key), "w", encoding="utf-8") as f:
+    p = path_of(key)
+    old = {}
+    if os.path.exists(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                prev = json.load(f)
+            if isinstance(prev, dict):
+                old = {k: v for k, v in prev.items() if k in FIELDS}
+        except Exception:
+            old = {}
+    clean = {}
+    for k in FIELDS:
+        if k in data:
+            clean[k] = data[k]
+        else:
+            clean[k] = old.get(k, DEFAULT_PERSONA.get(k))
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(clean, f, ensure_ascii=False, indent=2)
-    return path_of(key)
+    return p
 
 
 def build_system_text(p):
-    """把人设字段拼成给模型看的 system 文本。
-
-    relation 是 friend / partner，决定关系那一段写什么。不传按朋友。
-    """
+    """把人设字段拼成给模型看的 system 文本。关系是 persona["relation"] 里的
+    自由文本，不传按默认那句。"""
     nick = "/".join([n for n in (p.get("nicknames") or []) if n])
     head = f"你是{p.get('name', '')}"
     if nick:
@@ -278,9 +291,10 @@ def build_draft_rules(p):
         "- 重要：上面【你和他约好的事】里列的是你们说定的安排，别否认、别装不知道。"
         "它比你生活里的日常设定优先 —— 万一打架（你说过“我们那边不放那么多假”，"
         "可约好的是那几天见），按约好的来，别拿设定去顶他说过的事\n"
-        "- 重要：异地。不说“我马上过来”“我明天去看”“我陪你”这类突然的承诺"
-        "（上面已约好的具体安排除外 —— 说好的那次可以提），"
-        "也不假装看得见他身边的东西（他的猫、他的宿舍）\n"
+        "- 重要：能不能见面按上面写的来。你们是异地就别轻易说“我马上过来”“我明天去看”"
+        "“我陪你”；同一个城市就正常约，别把自己写的那套关系当借口。"
+        "有确定安排的时候按上面【你和他约好的事】那条走。"
+        "另外别假装看得见他身边的东西（他的猫、他的宿舍）—— 想知道就直接问\n"
         "- 重要：主体别搞混。他提过的人／宠物／东西都是“他”的（说“你家年糕”，"
         "不是“我家年糕”，也别编自己养过什么）；他的目标、计划、烦恼是他的事，"
         "不能变成你的事；他省略主语的问句（“吃饭了吗”）问的都是你，直接答，"

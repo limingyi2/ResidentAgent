@@ -369,5 +369,44 @@ class TestServiceAddrNotCommitted(unittest.TestCase):
         self.assertIn("settings", body, "地址为空时要把人送到设置页")
 
 
+class TestAlbumDirIsOneConstant(unittest.TestCase):
+    """相册目录只能有一个来源。
+
+    saveImage 往这个目录写、deleteImage 按同一个目录查 —— MediaStore 的
+    delete 是按目录精确匹配的。两处各写一份字面量，改了其中一个没改另一个，
+    表现是"图存得进、删不掉"，而且不报错，很难查。
+    """
+    def setUp(self):
+        p = os.path.join(ROOT, "android-app", "app", "src", "main", "java",
+                         "com", "resident", "chat", "MainActivity.java")
+        with open(p, encoding="utf-8") as f:
+            self.src = f.read()
+
+    def test_album_dir_constant_exists(self):
+        self.assertIn('ALBUM_DIR = "Pictures/', self.src)
+
+    def test_no_stray_literal_for_current_dir(self):
+        """当前目录不能另有字面量 —— save/delete 都得用 ALBUM_DIR。
+
+        老目录（改名之前存的图）是允许存在的，但要单独断言它在 deleteImage 里，
+        见 test_delete_also_tries_old_dirs。
+        """
+        new_dir = re.search(r'ALBUM_DIR = "(Pictures/[^"]*)"', self.src)
+        self.assertIsNotNone(new_dir, "找不到 ALBUM_DIR 定义")
+        rest = self.src.replace(new_dir.group(0), "", 1)
+        # 改名之前存的图还在老目录里，deleteImage 得能删到它们 ——
+        # 这几条是有意的例外，其余一律不许。
+        allowed = {"Pictures/知夏图片", "Pictures/知夏"}
+        for m in re.finditer(r'"(Pictures/[^"]*)"', rest):
+            if m.group(1) in allowed:
+                continue
+            self.fail("相册目录又出现字面量 %s —— 用 ALBUM_DIR" % m.group(0))
+
+    def test_delete_also_tries_old_dirs(self):
+        """改名之前存的图还在老目录里，删图片功能不能只认新目录。"""
+        self.assertIn("Pictures/知夏图片", self.src,
+                      "deleteImage 没试老目录 —— 老图删不掉了")
+
+
 if __name__ == "__main__":
     unittest.main()
