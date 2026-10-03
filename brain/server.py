@@ -151,7 +151,7 @@ def _auth_ok(auth_header, query_token, config_token, peer_ip):
     - 配了 token：Authorization 头优先，?token= 兼容老客户端（<img>/<audio>
       设不了头，只能走 query）；用 compare_digest 比，`==` 会在第一个不同的
       字符上短路，长度和前缀可以被计时探测出来。
-    - **没配 token：只放行本机回环**。以前是"没配就全放行"（fail-open），
+    - **没配 token：只放行本机回环**。不能"没配就全放行"（fail-open），
       配上 bind_host: 0.0.0.0 就等于把整个 API 摆到公网 —— 而忘记填 token
       恰恰是最常见的情况。
     """
@@ -296,7 +296,7 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
                 print(f"[大脑] 存档失败（不影响回复）：{e}", flush=True)
             return ans, mode, ""
         except _Busy:
-            # 排队超时：明确说出来，别让调用方无限期等（以前是挂死）
+            # 排队超时：明确说出来，别让调用方无限期等
             return "", "忙碌", "她正在回上一条，几秒后再发一次就好"
         except Exception as e:
             return "", "", f"{type(e).__name__}: {e}"
@@ -630,10 +630,13 @@ def start_remote_api(brain):
                             self._json(200, {"ok": False, "err": "总得有个名字"})
                             return
                         persona_store.save(fields, key)
-                        with _chat_lock():
-                            brain.reload_persona()
-                        print("[大脑] 人设已更新：%s" % name, flush=True)
-                        self._json(200, {"ok": True, "name": name})
+                        # 只有改的是当前那套才热重载：编辑别的模板不该动她
+                        if key == persona_store.key_from_config(api_config):
+                            with _chat_lock():
+                                brain.reload_persona()
+                        print("[大脑] 人设已更新：%s（%s）" % (name, key),
+                              flush=True)
+                        self._json(200, {"ok": True, "name": name, "key": key})
                     except Exception as e:
                         errlog.log_exc("api/persona/save", e)
                         self._json(200, {"ok": False, "err": str(e)[:120]})
@@ -670,6 +673,36 @@ def start_remote_api(brain):
                               flush=True)
                         self._json(200, {"ok": True, "name": her})
                     except Exception as e:
+                        self._json(200, {"ok": False, "err": str(e)[:80]})
+                elif path == "/api/persona/new":
+                    # 新建一套人设模板（不自动切过去，省得她换脸换名字你还没看仔细）
+                    try:
+                        import persona_store
+                        key = persona_store.create(
+                            body.get("name"),
+                            from_key=body.get("from") or None,
+                            label=body.get("label") or "",
+                            desc=body.get("desc") or "")
+                        print("[大脑] 新建人设模板 %s" % key, flush=True)
+                        self._json(200, {"ok": True, "key": key})
+                    except ValueError as e:
+                        self._json(200, {"ok": False, "err": str(e)[:80]})
+                    except Exception as e:
+                        errlog.log_exc("api/persona/new", e)
+                        self._json(200, {"ok": False, "err": str(e)[:80]})
+                elif path == "/api/persona/del":
+                    # 删模板。不热重载：被删的不是当前那套（remove 已挡掉）
+                    try:
+                        import persona_store
+                        ok, why = persona_store.remove(
+                            body.get("key"),
+                            current_key=persona_store.key_from_config(api_config))
+                        if ok:
+                            print("[大脑] 删除人设模板 %s"
+                                  % str(body.get("key"))[:40], flush=True)
+                        self._json(200, {"ok": ok, "err": why})
+                    except Exception as e:
+                        errlog.log_exc("api/persona/del", e)
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/voice/apply":
                     # 同人设切换，但内存里要同步两处：api_config 和 API_CFG
@@ -905,7 +938,10 @@ def start_remote_api(brain):
                     pass
                 self._json(200, {"name": name, "key": cur, "presets": presets,
                                  "relation": persona_store.relation_of(
-                                     persona_store.load(cur))})
+                                     persona_store.load(cur)),
+                                 "templates": persona_store.list_templates(cur),
+                                 "max": persona_store.MAX_TEMPLATES,
+                                 "used": persona_store.template_count()})
             elif path == "/api/voices":
                 # 清单是 VOICE_CATALOG 里的死数据，不联网 —— 设置页必须永远打得开
                 try:

@@ -110,6 +110,16 @@ body.notab .page { bottom:0; }
 .setrow .lab { width:88px; font-size:15px; flex:none; }
 .setrow input { flex:1; border:none; outline:none; font-size:14px; background:transparent; min-width:0; }
 .hint { font-size:11.5px; color:#b2b2b2; padding:7px 14px; line-height:1.5; }
+/* ---- 人设模板列表 ---- */
+.tplcell { display:flex; align-items:center; gap:8px; padding:12px 14px; background:#fff; border-bottom:0.5px solid #f0f0f0; }
+.tplcell.on { background:#f2fbf6; }
+.tplmain { flex:1; min-width:0; }
+.tplname { font-size:14.5px; color:#191919; display:flex; align-items:center; gap:6px; }
+.tplnow { font-size:10.5px; color:#07c160; border:0.5px solid #07c160; border-radius:3px; padding:0 3px; }
+.tpldesc { font-size:11.5px; color:#b2b2b2; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tplbtns { display:flex; flex:none; gap:6px; }
+.tplb { font-size:12.5px; color:#57606a; border:0.5px solid #dcdcdc; border-radius:5px; padding:5px 9px; }
+.tplb.del { color:#fa5151; border-color:#f5c2c2; }
 /* ---- 功能开关 ---- */
 .featrow { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#fff; border-bottom:0.5px solid #f0f0f0; }
 .featlab { font-size:14.5px; color:#191919; }
@@ -293,9 +303,9 @@ body.notab .page { bottom:0; }
         <div class="cmain"><div class="cname">错误日志</div><div class="cprev" id="logSum">出问题了来这里导出</div></div><span class="arrow">›</span></div>
     </div>
     <div class="grp">
-      <div class="setrow"><div class="lab">她是谁</div><input id="personaCur" readonly placeholder="点这里改她的设定"></div>
+      <div class="setrow" onclick="openTemplateManager()"><div class="lab">人设模板</div><input id="personaCur" readonly placeholder="点这里管理她的人设"></div>
       <div id="personaList"></div>
-      <div class="hint">名字、性格、你们的关系、长相都能改，改完立刻生效，不用重启。记忆和聊天记录都不受影响。</div>
+      <div class="hint">名字、性格、你们的关系、长相都能改，改完立刻生效，不用重启。记忆和聊天记录都不受影响。最多存 5 套，随时切换。</div>
     </div>
     <div class="grp">
       <div class="setrow"><div class="lab">她的声音</div><input id="voiceCur" readonly placeholder="加载中…"></div>
@@ -1352,10 +1362,110 @@ async function loadPersonas() {
   try {
     const d = await (await fetch(api('/api/persona'))).json();
     cur.value = d.name || '（未设置人设）';
-    cur.style.cursor = 'pointer';
-    cur.onclick = openPersonaEditor;
     if (d.name) applyWho(d.name);
   } catch (e) { cur.value = '加载失败'; }
+}
+
+/* --- 人设模板管理 --- */
+let tplData = { templates: [], max: 5, used: 0 };
+
+// 确认弹层：原生 confirm() 在 WebView 里弹不出来、整个界面假死，一律自绘
+function confirmSheet(msg, onYes, yesLabel) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;padding:28px';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:12px;width:100%;max-width:320px;overflow:hidden';
+  const t = document.createElement('div');
+  t.style.cssText = 'padding:20px 18px 14px;font-size:15px;line-height:1.6;text-align:center';
+  t.textContent = msg;
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;border-top:1px solid #f0f0f0';
+  function btn(label, color, fn) {
+    const b = document.createElement('div');
+    b.style.cssText = 'flex:1;padding:13px;text-align:center;font-size:16px;color:' + color;
+    b.textContent = label;
+    b.onclick = () => { ov.remove(); if (fn) fn(); };
+    row.appendChild(b);
+  }
+  btn('取消', '#57606a', null);
+  btn(yesLabel || '确定', '#fa5151', onYes);
+  box.appendChild(t); box.appendChild(row); ov.appendChild(box);
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+}
+
+async function openTemplateManager() {
+  try { tplData = await (await fetch(api('/api/persona'))).json(); }
+  catch (e) { return tip('读不出来，检查网络'); }
+  const tpls = tplData.templates || [];
+  const max = tplData.max || 5, used = tplData.used || 0;
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-end';
+  const inner = document.createElement('div');
+  inner.style.cssText = 'background:#f5f5f5;width:100%;max-height:86vh;border-radius:14px 14px 0 0;display:flex;flex-direction:column';
+  let html = '<div style="padding:14px 16px 10px;font-size:15px;font-weight:600;border-bottom:1px solid #ebebeb;display:flex;align-items:center">' +
+    '<span style="flex:1">人设模板</span>' +
+    '<span style="font-size:12px;color:#888;font-weight:400">已用 ' + used + ' / ' + max + '</span></div>';
+  html += '<div style="flex:1;overflow-y:auto;padding:8px 0">';
+  if (!tpls.length) {
+    html += '<div style="padding:22px 16px;font-size:13px;color:#999;text-align:center">还没有人设，点下面新建一套</div>';
+  }
+  tpls.forEach(t => {
+    const cur = t.current;
+    const title = t.blank ? '（空白 · 未设置）' : (t.name || t.label);
+    html += '<div class="tplcell' + (cur ? ' on' : '') + '" data-key="' + esc(t.key) + '">' +
+      '<div class="tplmain"><div class="tplname">' + esc(title) +
+      (cur ? '<span class="tplnow">在用</span>' : '') + '</div>' +
+      (t.desc ? '<div class="tpldesc">' + esc(t.desc) + '</div>' : '') + '</div>' +
+      '<div class="tplbtns">' +
+      '<span class="tplb" data-a="edit">编辑</span>' +
+      (cur ? '' : '<span class="tplb" data-a="use">换上</span>') +
+      (cur || t.blank ? '' : '<span class="tplb del" data-a="del">删除</span>') +
+      '</div></div>';
+  });
+  html += '</div>';
+  const canAdd = used < max;
+  html += '<div style="padding:10px 14px;border-top:1px solid #ebebeb;background:#fff;display:flex;gap:10px">' +
+    '<button id="tplClose" style="flex:1;height:42px;border:none;border-radius:8px;background:#f2f2f2;font-size:15px">关闭</button>' +
+    '<button id="tplAdd" ' + (canAdd ? '' : 'disabled ') +
+    'style="flex:2;height:42px;border:none;border-radius:8px;font-size:15px;color:' +
+    (canAdd ? '#fff' : '#999') + ';background:' + (canAdd ? '#07c160' : '#e8e8e8') + '">' +
+    (canAdd ? '新建一套' : '额度用满了（' + used + '/' + max + '）') + '</button></div>';
+  inner.innerHTML = html;
+  ov.appendChild(inner);
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  $('tplClose').onclick = close;
+  $('tplAdd').onclick = () => { if (canAdd) { close(); openPersonaEditor(''); } };
+
+  inner.querySelectorAll('.tplcell').forEach(cell => {
+    const key = cell.getAttribute('data-key');
+    cell.querySelectorAll('.tplb').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const a = b.getAttribute('data-a');
+        if (a === 'edit') { close(); openPersonaEditor(key); }
+        else if (a === 'use') {
+          confirmSheet('换成这套？\n她接下来的说话方式会变，\n你们聊过的还都记得。',
+            () => applyPersona(key, cell.querySelector('.tplname').textContent));
+        } else if (a === 'del') {
+          confirmSheet('删掉这套人设？\n删了就找不回来了。', async () => {
+            try {
+              const r = await fetch(api('/api/persona/del'), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: key })
+              });
+              const j = await r.json();
+              tip(j.ok ? '已删除' : (j.err || '删除失败'));
+              if (j.ok) openTemplateManager();
+            } catch (e) { tip('删除失败，检查网络'); }
+          }, '删除');
+        }
+      };
+    });
+  });
 }
 
 const PERSONA_FIELDS = [
@@ -1371,13 +1481,30 @@ const PERSONA_FIELDS = [
 ];
 
 
-async function openPersonaEditor() {
+// key 为空 = 新建：先 POST /api/persona/new 拿到 key，再进编辑器
+async function openPersonaEditor(key) {
   let d;
   try { d = await (await fetch(api('/api/persona'))).json(); }
   catch (e) { return tip('读不出来，检查网络'); }
+  let target = key || '';
+  if (!target) {
+    const name = await promptSheet('新套人设', '给她起个名字（之后还能改）');
+    if (!name) return;
+    try {
+      const r = await fetch(api('/api/persona/new'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, from: d.key || '' })
+      });
+      const j = await r.json();
+      if (!j.ok) return tip(j.err || '新建失败');
+      target = j.key;
+      tip('已建好「' + name + '」，填完保存就生效');
+    } catch (e) { return tip('新建失败，检查网络'); }
+  }
   const cur = {};
   try {
-    const full = await (await fetch(api('/api/persona/full?key=' + encodeURIComponent(d.key || '')))).json();
+    const full = await (await fetch(api('/api/persona/full?key=' + encodeURIComponent(target)))).json();
+    if (!full.ok) return tip(full.err || '读人设失败');
     Object.assign(cur, full.fields || {});
   } catch (e) { tip('读人设失败'); return; }
 
@@ -1421,7 +1548,7 @@ async function openPersonaEditor() {
     try {
       const r = await fetch(api('/api/persona/save'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: out })
+        body: JSON.stringify({ key: target, fields: out })
       });
       const j = await r.json();
       if (j.ok) { close(); tip('改好了'); loadPersonas(); if (j.name) applyWho(j.name); }
@@ -1429,8 +1556,40 @@ async function openPersonaEditor() {
     } catch (e) { $('pSave').disabled = false; $('pSave').textContent = '保存'; tip('保存失败，检查网络'); }
   };
 }
+
+// 单行输入弹层（新建人设时问名字）。返回 Promise<string|null>，取消给 null
+function promptSheet(title, hint) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;padding:28px';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:12px;width:100%;max-width:320px;overflow:hidden';
+    box.innerHTML = '<div style="padding:16px 18px 6px;font-size:15px;font-weight:600">' + esc(title) + '</div>' +
+      '<div style="padding:0 18px 10px;font-size:12px;color:#888">' + esc(hint) + '</div>' +
+      '<input id="psIn" style="margin:0 18px;width:calc(100% - 36px);height:40px;border:1px solid #e5e5e5;border-radius:8px;padding:0 10px;font-size:15px;box-sizing:border-box">' +
+      '<div style="display:flex;border-top:1px solid #f0f0f0;margin-top:14px">';
+    const row = box.lastChild;
+    function btn(label, color, fn) {
+      const b = document.createElement('div');
+      b.style.cssText = 'flex:1;padding:13px;text-align:center;font-size:16px;color:' + color;
+      b.textContent = label;
+      b.onclick = () => { ov.remove(); fn(); };
+      row.appendChild(b);
+    }
+    btn('取消', '#57606a', () => resolve(null));
+    btn('下一步', '#07c160', () => resolve(($('psIn').value || '').trim()));
+    ov.appendChild(box);
+    ov.onclick = (e) => { if (e.target === ov) { ov.remove(); resolve(null); } };
+    document.body.appendChild(ov);
+    const inp = $('psIn');
+    inp.focus();
+    inp.onkeydown = (e) => {
+      if (e.key === 'Enter') { ov.remove(); resolve((inp.value || '').trim()); }
+    };
+  });
+}
+
 async function applyPersona(key, label) {
-  if (!confirm('换成「' + (label || key) + '」？她接下来的说话方式会变，但你们聊过的还都记得。')) return;
   tip('切换中…');
   try {
     const r = await fetch(api('/api/persona/apply'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key }) });
@@ -1500,7 +1659,11 @@ async function previewVoice(key, btn) {
   btn.disabled = false;
 }
 async function applyVoice(key, label) {
-  if (!confirm('把她的声音换成「' + (label || key) + '」？\n\n只影响她发的语音条，说话方式、长相和聊天记录都不变。')) return;
+  // 同人设切换：原生 confirm 会假死，走自绘确认
+  confirmSheet('把她的声音换成「' + (label || key) + '」？\n\n只影响她发的语音条，'
+    + '说话方式、长相和聊天记录都不变。', () => doApplyVoice(key, label), '换上');
+}
+async function doApplyVoice(key, label) {
   tip('切换中…');
   try {
     const r = await fetch(api('/api/voice/apply'), {

@@ -561,7 +561,7 @@ class Brain:
         img：这一轮带的图片路径（有的话会记进聊天存档，手机/App 那边好显示）。
         图片内容本身早就在 user_text 里被描述成文字了 —— 她看不见像素，只看得见描述。
         """
-        from memory_store_v2 import MemoryStore
+        from memory_store_v2 import MemoryStore, classify_her_speech
 
         memory_block = ""
         # 短句闲聊（"嗯""在吗""哈哈"）不检索：这种话本身没信息量，硬凑出来的

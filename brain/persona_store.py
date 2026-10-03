@@ -10,11 +10,15 @@ notes 创作者备注（给 AI 的内部指令，原样拼进系统提示）。
 """
 import os
 import json
+import time
+import random
 
 BASE = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE, "config", "config.json")
 try:
     import paths
     PERSONA_DIR = paths.PERSONA_DIR      # config/personas：人设是你手动改的配置
+    CONFIG_PATH = paths.CONFIG_PATH
 except Exception:
     PERSONA_DIR = os.path.join(BASE, "config", "personas")
 DEFAULT_KEY = "default"
@@ -46,7 +50,7 @@ FIELDS = ["name", "nicknames", "background", "scene", "personality",
 # 关系定位 —— 她跟"他"是什么关系。
 #
 # 放在人设里而不是 config.json：关系是"她是谁"的一部分，换人设时一起换。
-# 原来是 friend/partner 两档枚举，已删——"十年老友""正在追她""同居"都不在里头，
+# 早先是 friend/partner 两档枚举，"十年老友""正在追她""同居"都不在里头，
 # 枚举永远补不完。现在是 persona["relation"] 一段自由文本，App 里直接编辑。
 #
 # 不塞进 CORE_RULES 也有原因：CORE_RULES 末尾权重最高（build_system_text 里
@@ -151,19 +155,191 @@ def list_personas():
     return out
 
 
+# 模板数量上限。超过就不让再建：模板多了手机上根本翻不完，而每套都占一份
+# 人设文件（还要被 build_system_text 拼进每轮上下文）。
+# 空白兜底模板（name 为空）不计入额度 —— 它是"还没设置"的占位，不是用户建的。
+MAX_TEMPLATES = 5
+
+
+def _key_ok(key):
+    """模板文件名合法性：只允许字母数字下划线连字符。
+
+    key 会拼进文件路径去写盘（create/remove），os.path.basename 挡的是
+    "..\\..\\x" 这种，但 Windows 上还有 ADS（`x.json:stream`）、保留设备名
+    （CON/NUL/PRN…）和结尾点号这类边角。模板 key 是我们自己生成的时间戳串，
+    外部只可能从 App 传进来，所以这里收得紧一点最省事。
+    """
+    k = str(key or "")
+    if not k or len(k) > 64:
+        return False
+    bad = set("<>:\"/\\|?*") | set(chr(c) for c in range(32))
+    if bad & set(k) or k != k.strip(".") or k in (
+            "CON", "PRN", "AUX", "NUL", "COM1", "LPT1"):
+        return False
+    return all(ch.isalnum() or ch in "_-" for ch in k)
+
+
+def is_blank(persona):
+    """这套是不是还没填的空白兜底（name 空）。"""
+    return not str((persona or {}).get("name") or "").strip()
+
+
+def list_templates(current_key=None):
+    """列出当人设模板，返回 [{key,label,desc,name,blank,current}]，按展示顺序排。
+
+    current_key 传运行时真源（内存里的 config）；不传才回退读磁盘 config.json。
+    必须由调用方传：磁盘那份可能和内存不同步（写盘失败、或刚 apply 过），
+    拿磁盘判断会把"正在用的那套"标错，App 里就显示错了在用哪套。
+    """
+    if current_key is None:
+        try:
+            current_key = key_from_config(_current_config())
+        except Exception:
+            current_key = None
+    out = []
+    if not os.path.isdir(PERSONA_DIR):
+        return out
+    for fn in sorted(os.listdir(PERSONA_DIR)):
+        if not fn.endswith(".json"):
+            continue
+        key = fn[:-5]
+        if not _key_ok(key):
+            continue
+        try:
+            with open(os.path.join(PERSONA_DIR, fn), encoding="utf-8") as f:
+                d = json.load(f)
+            if not isinstance(d, dict):
+                d = {}
+        except Exception:
+            d = {}
+        blank = is_blank(d)
+        out.append({
+            "key": key,
+            "label": (d.get("label") or d.get("name") or
+                      ("（未设置）" if blank else key)),
+            "desc": (d.get("desc") or "")[:60],
+            "name": d.get("name") or "",
+            "blank": blank,
+            "current": key == current_key,
+        })
+    # 当前生效的排最前，其余按名字排 —— 空白兜底沉到末尾，别占着第一位
+    out.sort(key=lambda x: (not x["current"], x["blank"],
+                            x["label"]))
+    return out
+
+
+def template_count():
+    """已用额度：只有填了名字的才算，空白兜底不占。"""
+    if not os.path.isdir(PERSONA_DIR):
+        return 0
+    n = 0
+    for fn in os.listdir(PERSONA_DIR):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(PERSONA_DIR, fn), encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict) and str(d.get("name") or "").strip():
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
+def create(name, from_key=None, label="", desc=""):
+    """新建一套人设模板，返回新 key；失败抛 ValueError（原因写在异常里）。
+
+    from_key 非空就拿那套的内容当底稿复制（改完是独立一份，不互相牵连）。
+    额度满、名字空、key 非法都直接拒绝，不做静默降级。
+    """
+    name = str(name or "").strip()
+    if not name:
+        raise ValueError("总得有个名字")
+    if template_count() >= MAX_TEMPLATES:
+        raise ValueError("最多 %d 套人设，删掉一套再新建" % MAX_TEMPLATES)
+    if from_key and not _key_ok(str(from_key)):
+        raise ValueError("底稿那套不存在")
+    src = {}
+    if from_key:
+        p = path_of(str(from_key))
+        if not os.path.isfile(p):
+            raise ValueError("底稿那套不存在")
+        try:
+            with open(p, encoding="utf-8") as f:
+                src = json.load(f)
+        except Exception:
+            src = {}
+    # key 用时间戳+随机：中文名不能当文件名（各平台编码不一），撞名也比拼音好懂
+    stamp = time.strftime("%y%m%d_%H%M%S")
+    key = "u%s_%s" % (stamp, "".join(random.choice("abcdefghijkmnpqrstuvwxyz")
+                                     for _ in range(3)))
+    while os.path.exists(path_of(key)):
+        key += "x"
+    data = {k: src.get(k, DEFAULT_PERSONA.get(k)) for k in FIELDS}
+    data["name"] = name
+    if label:
+        data["label"] = str(label)[:20]
+    if desc:
+        data["desc"] = str(desc)[:60]
+    # 复制来的 appearance 会让新角色顶着上一张脸；换个名字多半就是换人，
+    # 长相留空由本人重填更省事（想沿用就手动再填回去）
+    if from_key:
+        data["appearance"] = ""
+    save(data, key)
+    return key
+
+
+def remove(key, current_key=None):
+    """删掉一套人设模板。返回 (ok, 原因)。
+
+    只挡一种：当前正在用的那套（删了她当场变无名氏）。
+    current_key 必须由调用方传运行时真源（内存 config）；不传才回退读磁盘 ——
+    磁盘那份可能刚被改过或写盘失败过，拿它判断会把在用的那套放过去删掉。
+    曾经还挡"最后一套有名字的"，结果额度满时形成死锁 —— 想换人设得先删，
+    删不掉就建不了。这里放开，删光了就退回空白兜底（App 显示"未设置"），
+    是不是真要删由 App 的确认弹层问用户。
+    """
+    key = str(key or "")
+    if not _key_ok(key):
+        return False, "模板名不合法"
+    p = path_of(key)
+    if not os.path.isfile(p):
+        return False, "没有这套人设"
+    if current_key is None:
+        try:
+            current_key = key_from_config(_current_config())
+        except Exception:
+            current_key = None
+    if key == current_key:
+        return False, "正在用的是这套，先切到别的再删"
+    try:
+        os.remove(p)
+    except Exception as e:
+        return False, "删不掉：%s" % str(e)[:60]
+    return True, ""
+
+
+def _current_config():
+    """读 config.json 拿当前 persona_file。
+
+    import 放在函数里：persona_store 被 brain.runtime 的 import 链拉起来时，
+    config.json 可能还没写好（首启动自检会先 import 再落盘）。
+    """
+    try:
+        p = CONFIG_PATH
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def load(key=None):
     """读一套人设；文件不存在/读坏就用内置默认值补齐。
 
-    找不到配置指向的那份文件时**必须出声**。这个函数原来是完全静默的
-    （`except Exception: pass`），于是 `personas/*.json` 一旦改名 —— 只要
-    config.json 的 persona_file 还指着旧名字 —— 她的自定义人设会被悄悄换成
+    找不到配置指向的那份文件时**必须出声**，不能静默退回空模板：文件一改名
+    （config.json 的 persona_file 还指着旧名字），她的自定义人设会被悄悄换成
     内置空模板，表现只是"她好像不太一样了"，查起来毫无线索。
-    （2026-10-03 实测：仓库脱敏时把人设文件改名成了 default.json，而本地
-    config.json 的 persona_file 还指着旧角色名，load() 就一直返回空模板。
-    这里刻意不写出那个旧名 —— 脱敏过的仓库里不该再留它的字面量，
-    连注释也不行。）
-
-    退一步：配置那份不在、而 DEFAULT_KEY 那份在，就用 DEFAULT_KEY，并说明。
+    退一步：配置那份不在、而 DEFAULT_KEY 那份在，就用 DEFAULT_KEY 并打印说明。
     """
     key = key or DEFAULT_KEY
     p = path_of(key)
@@ -192,9 +368,9 @@ def load(key=None):
 def save(data, key):
     """保存一套人设（只保留 FIELDS 里的字段）。
 
-    data 里没有的键沿用文件里原来的值，不是清成默认。
+    data 里没传的键沿用文件里已存的值，不是清成默认。
     label/desc 是列表元数据，App 的人设编辑器里没有这两栏（用户不该看见它们），
-    前端不会传 —— 原先一律 data.get(k, DEFAULT_PERSONA[k]) 兜底，
+    前端不会传 —— 一律 data.get(k, DEFAULT_PERSONA[k]) 兜底的话，
     在 App 里保存一次就把它们清空了，列表里的副标题跟着没。
     区分"键没传"和"传了空串"：前者沿用旧值，后者是用户主动清空，照写。
     """
