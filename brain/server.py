@@ -138,6 +138,22 @@ class _Busy(Exception):
     """等聊天锁超时：这一轮没轮到脑子。"""
 
 
+def _norm_src(src):
+    """把请求里的渠道名收拾成已知渠道。
+
+    白名单而不是黑名单：渠道名会拼进存档文件名，写进配置也决定读哪份人设，
+    认不出来的值一律当默认渠道。手机上多传一个 src 字段不会出事，
+    但传个 "../../evil" 也不该有机会。
+    """
+    try:
+        import paths
+        allowed = paths.CHANNELS
+    except Exception:
+        allowed = ("app", "wechat")
+    s = str(src or "").strip().lower()
+    return s if s in allowed else "app"
+
+
 @contextlib.contextmanager
 def _chat_lock(timeout=CHAT_LOCK_WAIT):
     """有上限地拿聊天锁（超时抛 _Busy，不无限期阻塞）。"""
@@ -199,7 +215,7 @@ def _snapshot(b):
     }
 
 
-def _chat_with_tools(text, img_path, trace_out=None):
+def _chat_with_tools(text, img_path, trace_out=None, src=None):
     """聊一轮，带模型自选工具：她写了 [tool:名] 就执行并喂回结果让她重答。
 
     开关 tools 关了就走普通聊天。锁在每轮 chat 里拿 —— 工具查询本身不碰
@@ -208,7 +224,7 @@ def _chat_with_tools(text, img_path, trace_out=None):
     def _once(t):
         with _chat_lock():
             b = _LOCAL["brain"]
-            ans, mode = b.chat(t, img=img_path, log=False)
+            ans, mode = b.chat(t, img=img_path, log=False, src=src)
             # trace 字段长在共享的大脑对象上，得趁锁还在手里抄。出了锁再读，
             # 并发那一轮会把它覆盖掉。
             # 每轮都覆盖：工具调用走两轮 chat，用户看到的是最后一轮的结果。
@@ -238,12 +254,14 @@ def _chat_with_tools(text, img_path, trace_out=None):
     return ans, mode
 
 
-def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
+def ask_with_retry(text, img_b64=None, display=None, trace_out=None, src=None):
     """让她回一句话。
 
     img_b64：这一轮带的图片（base64），交给视觉模型让她"看见"。
     display：存档/给用户看的那份原文（不含系统注入的提示），None 就用 text。
     trace_out：可选 dict；填上就在**持锁时**抄下这轮的 trace 字段（见 _snapshot）。
+    src：渠道（app / wechat）。决定读哪份人设、哪份对话历史、哪个记忆分区 ——
+    不传就是主渠道（手机 App / 桌宠）。
     返回 (她的话, 模式标签, 错误信息) —— 不抛异常，调用方好写。
 
     server.py 只有一种形态：本进程自带大脑，不再转发给桌宠。
@@ -277,6 +295,9 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
             # 他要自拍：不指望模型"只打字不发图"，直接按她此刻的时间和地点
             # 现场生成一张，正文用第一人称短句
             try:
+                _b = _LOCAL["brain"]
+                if src:
+                    _b.use_src(src)     # 存档走哪份文件，取决于这轮是哪个渠道
                 if not img_b64 and _looks_like_selfie(text):
                     sp, place = _selfie_prompt()
                     name = _cloud_gen_selfie(sp, negative_prompt=GEN_NEGATIVE,
@@ -284,7 +305,7 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
                     if name:
                         ans = _selfie_caption(place) + "\n[img:" + name + "]"
                         try:
-                            _LOCAL["brain"]._log_turn(orig_text, ans, img=None)
+                            _b._log_turn(orig_text, ans, img=None)
                         except Exception as e:
                             print(f"[大脑] 自拍存档失败（不影响回复）：{e}",
                                   flush=True)
@@ -293,7 +314,7 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None):
                 print(f"[大脑] 自拍生成失败，回退正常对话：{e}", flush=True)
             # 锁在 _chat_with_tools 的每轮 chat 里拿（带超时），别抱着锁等网络
             ans, mode = _chat_with_tools(text, img_path or None,
-                                         trace_out=trace_out)
+                                         trace_out=trace_out, src=src)
             # 剥掉学出来的「说」标记；[gen:xxx] 换成 [img:名字]
             look = _her_look()
             ans = resolve_gen_tags(strip_say_marker(ans), look)
@@ -397,9 +418,14 @@ def _cloud_diary_read(date_str):
     return "\n".join(lines).strip()
 
 
-def _cloud_history(limit=60):
-    """最近 N 条聊天记录（t / role / text），给手机 App 显示会话用。"""
-    p = data_file("chat_history.jsonl",
+def _cloud_history(limit=60, src="app"):
+    """最近 N 条聊天记录（t / role / text），给手机 App 显示会话用。
+
+    按渠道读不同文件 —— App 里不该看见微信侧那半份对话。
+    """
+    p = data_file("chat_history.jsonl"
+                  if _norm_src(src) == "app" else
+                  "chat_history.%s.jsonl" % _norm_src(src),
                   r"C:\linzhixia\data\chat_history.jsonl")
     items = []
     try:
@@ -478,6 +504,10 @@ def start_remote_api(brain):
                 if path == "/api/chat":
                     _in_text = str(body.get("text") or "")
                     _disp = _in_text          # 存档用原文，注入的系统提示不带
+                    # 渠道：手机 App 传 app（默认），微信那边传 wechat。
+                    # 认不出来的值当默认 —— 宁可跟 App 共用，也别因为一个
+                    # 拼错的字段名开出空历史让她失忆。
+                    _src = _norm_src(body.get("src"))
                     # 话里带单号就进监控（每 30 分钟自动查），现状也塞给模型，
                     # 她回话时能顺口说一句"刚发出去了"
                     try:
@@ -501,7 +531,7 @@ def start_remote_api(brain):
                     _snap = {}
                     ans, mode, err = ask_with_retry(
                         _in_text, body.get("img") or None, display=_disp,
-                        trace_out=_snap)
+                        trace_out=_snap, src=_src)
                     # 出错就留一行（欠费 402、模型名写错、地址变了都在这儿现形）
                     if err:
                         try:
@@ -520,6 +550,7 @@ def start_remote_api(brain):
                         _trace_write({
                             "t": time.strftime("%Y-%m-%d %H:%M"),
                             "kind": "chat",
+                            "src": _src,
                             "in_len": len(_in_text),
                             "blocks": _snap.get("blocks") or {},
                             "mem_hits": _snap.get("mem_hits", 0),
@@ -573,18 +604,23 @@ def start_remote_api(brain):
                 elif path == "/api/history/clear":
                     # 存档只有云上这一份。早先桌宠直接调本地 Brain.clear_history()
                     # 删的是本机文件，云上那份一动不动，看着清了其实没清。
+                    # 分渠道后只清请求里指定的那份（不传=App），清微信的不影响手机。
+                    _csrc = _norm_src(body.get("src") if body else None)
                     ok = False
                     try:
                         from brain import Brain
-                        ok = bool(Brain.clear_history())
+                        ok = bool(Brain.clear_history(_csrc))
                     except Exception as e:
                         print(f"[大脑] 清空聊天存档失败：{e}", flush=True)
                     try:
                         with _chat_lock():
-                            if hasattr(brain, "reset"):
-                                brain.reset()
+                            _bl = _LOCAL.get("brain")
+                            if _bl is not None:
+                                _bl.clear_src_history(_csrc)
                     except _Busy:
                         pass
+                    except Exception as e:
+                        print(f"[大脑] 清内存历史失败：{e}", flush=True)
                     self._json(200, {"ok": ok})
                 elif path == "/api/life/catchup":
                     # 会调模型，慢，客户端放在后台线程里等
@@ -1062,7 +1098,8 @@ def start_remote_api(brain):
                 self._json(200, {"body": _cloud_diary_read(ds)})
             elif path == "/api/history":
                 lim = _query_param(self.path, "limit") or 60
-                self._json(200, {"items": _cloud_history(lim)})
+                self._json(200, {"items": _cloud_history(
+                    lim, _query_param(self.path, "src") or "app")})
             elif path == "/api/moments":
                 try:
                     import moments

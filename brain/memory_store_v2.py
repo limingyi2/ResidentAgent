@@ -653,7 +653,7 @@ class MemoryStore:
         return self._mat
 
     # --- 写入 ---
-    def add(self, text, mtype="event", src=""):
+    def add(self, text, mtype="event", src="", chan=None):
         """添加一条记忆（自动向量化）。
 
         本方法是唯一会从**别的线程**跑的写入口（brain 里记忆抽取是后台线程），
@@ -662,6 +662,10 @@ class MemoryStore:
 
         src 记这条记忆的来源：chat = 对话里说的（可信），proactive = 主动搭话
         自己冒出来的（大概率是编的，检索时降权）。空 = 用户那边抽的。
+
+        chan 记渠道（app / wechat）。她同时在手机和微信上跟不同的人说话时，
+        两边认得的人不该混：检索按渠道过滤，见 render 的 chan 参数。
+        跟 src 是两回事 —— 一个说"从哪句话里抽的"，一个说"从哪个入口抽的"。
         """
         text = (text or "").strip()
         if not text:
@@ -681,6 +685,8 @@ class MemoryStore:
                     "time": time.strftime("%Y-%m-%d %H:%M")}
             if src:
                 item["src"] = src
+            if chan:
+                item["chan"] = chan
             self.data["items"].append(item)
             self.save()
             # 向量化并追加到内存索引
@@ -760,7 +766,8 @@ class MemoryStore:
         return out
 
     @_synchronized
-    def render(self, query=None, top_k=5, max_items=20, min_score=0.40):
+    def render(self, query=None, top_k=5, max_items=20, min_score=0.40,
+               chan=None):
         """注入块：有 query 用检索，无 query 用最近 max_items 条。
 
         min_score 取 0.40 而不是 0.25：0.25 太松，随便一句闲聊都能拉出 5 条"沾边"的旧记忆
@@ -771,13 +778,30 @@ class MemoryStore:
           她随时可能当成即将发生提起）
         - 主动搭话自己冒出来的承诺降权（src=proactive，那多半是编的）
         降权后低于阈值的直接不注入，但不删 —— 删了找不回来。
+
+        chan 按渠道隔离：她在微信上认的人不该出现在 App 的上下文里，反之亦然。
+        条目没写 chan 就算主渠道（老数据全是这样，不用迁移）。
         """
+        # 没标渠道的条目一律算主渠道，跟"不传 chan"时的行为一致
+        want = str(chan or "").strip().lower()
+
+        def _ok(item):
+            if not want:
+                return True
+            # 没标渠道的条目算主渠道 —— 分渠道之前写的记忆全是"她在手机上
+            # 认识的那些"，归到微信侧等于让她把 App 那边的人全忘了。
+            return (str((item or {}).get("chan") or "").strip().lower()
+                    or "app") == want
+
         if query:
-            hits = self.retrieve(query, top_k=top_k, min_score=0.0)
+            hits = self.retrieve(query, top_k=top_k * 3, min_score=0.0)
             self.last_hits = list(hits)      # trace 落盘用原始相似度
             rows = []
             for s, t in hits:
-                w = _weight(self._find_item(t))
+                item = self._find_item(t)
+                if not _ok(item):
+                    continue
+                w = _weight(item)
                 if w <= 0:
                     continue
                 s2 = s * w
@@ -787,9 +811,11 @@ class MemoryStore:
             if rows:
                 return ("你记得他的事（这些是真的，聊天时自然地用上）：\n"
                         + "；".join(t for _, t in rows[:top_k]))
-        items = self.data["items"][-max_items:]
+        items = self.data["items"][-max_items * 3:]
         rows = []
         for i in items:
+            if not _ok(i):
+                continue
             w = _weight(i)
             if w <= 0:
                 continue

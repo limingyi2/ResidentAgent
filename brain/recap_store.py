@@ -164,7 +164,12 @@ def _day_path(day):
 # --- 聊天存档 ---
 
 def _read_log():
-    """读 chat_history.jsonl，返回 [(行号, 时间, 角色, 正文)]（行号从 1 起）"""
+    """读 chat_history.jsonl，返回 [(行号, 时间, 角色, 正文)]（行号从 1 起）
+
+    只读主渠道那份。历史摘要是给「她」回顾跟这个人聊过什么用的，
+    而她真正的对话底稿是主渠道的；微信侧是另一个人设，那边的对话不该
+    混进她的记忆里。
+    """
     if not os.path.exists(CHAT_LOG):
         return []
     out = []

@@ -34,6 +34,23 @@ STICKERS_DIR = os.path.join(DATA_DIR, "stickers")    # 她收藏的表情包
 RUN_DIR = os.path.join(DATA_DIR, "run")
 CHAT_LOG = os.path.join(DATA_DIR, "chat_history.jsonl")
 
+# --- 渠道隔离 ---
+# 她同时在手机 App 和微信上跟同一个人说话，两边要是共用一份历史，
+# 在 App 里说的"我在宿舍"会顺着微信那头的上下文往下编。
+# 每个渠道一份聊天存档，互不读取。渠道名同时用于记忆库分区（见 memory_store_v2）。
+# 生活流和朋友圈不分区 —— 那是同一个人在过同一种日子，分开反而不一致。
+CHANNELS = ("app", "wechat")
+
+
+def chat_log_for(src="app"):
+    """按渠道取聊天存档路径。app 沿用老文件名，老数据不用搬。"""
+    src = (src or "app").strip().lower()
+    if src not in CHANNELS:
+        src = "app"
+    if src == "app":
+        return CHAT_LOG
+    return os.path.join(DATA_DIR, "chat_history.%s.jsonl" % src)
+
 # --- data/run/：运行时标记 ---
 PET_STAMP = os.path.join(RUN_DIR, "pet_stamp")       # 看门狗上次拉桌宠的时间
 CATCHUP_LOCK = os.path.join(RUN_DIR, "catchup.lock")  # 生活补算的跨进程锁

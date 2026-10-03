@@ -93,4 +93,39 @@ def resolve_rand_tags(text, user_text=""):
                  "", out, flags=re.IGNORECASE)
     for k, v in _ph.items():
         out = out.replace(k, v)
-    return re.sub(r" {2,}", " ", out).strip()
+    return drop_missing_imgs(re.sub(r" {2,}", " ", out).strip())
+
+
+# 已经变成 rand_2026xxxx_xxxx.jpg / 真实素材名的标签，得确认文件真在。
+_IMG_TAG_RE = re.compile(r"\[img[:：]([^\]\n]+?)\s*\]")
+
+
+def drop_missing_imgs(text):
+    """把指向不存在图片的 [img:名字] 删掉，防 App 裂图。
+
+    模型偶尔凭空编文件名（实测见过 [img:无语.jpg] —— 清单里没有"无语.jpg"，
+    它把描述当成了文件名）。这种发出去就是 404 裂图。
+
+    **只对形态确定的素材名动手**（表情包库是 时间戳_md5.ext），其余一律放过。
+    宁可漏删也不误删：少发一张图只是少个表情，误删几次她就不敢发了。
+    """
+    def _sub(m):
+        name = (m.group(1) or "").strip()
+        if not name:
+            return ""
+        # rand_/gen_ 是刚落盘的生成图，文件必然在（能走到这一步就说明拉成功了）
+        if name.startswith("rand_") or name.startswith("gen_"):
+            return m.group(0)
+        # 表情包库文件名固定是 时间戳_md5.ext。**其余形态一律放过** ——
+        # 模型偶尔会把描述写成文件名（实测 [img:无语.jpg]），但宁可放过也不
+        # 误删：她要是发现发图总被吞，下次就不发了。
+        if not re.match(r"^\d{8}_\d{6}_[0-9a-f]{8}\.\w+$", name):
+            return m.group(0)
+        try:
+            import imggen
+            if imggen._cloud_sticker(name):
+                return m.group(0)
+            return ""
+        except Exception:
+            return m.group(0)
+    return _IMG_TAG_RE.sub(_sub, text or "")

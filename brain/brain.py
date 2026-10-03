@@ -28,9 +28,24 @@ INTENT_TMPL = "（你想跟他说的意思是：{draft}。用你自己的口气�
 try:
     import paths
     CHAT_LOG = paths.CHAT_LOG
+
+    def chat_log_for(src="app"):
+        return paths.chat_log_for(src)
 except Exception:                 # 单独跑某个文件时的兜底（正常走上面）
     CHAT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "data", "chat_history.jsonl")
+
+    def chat_log_for(src="app"):
+        return CHAT_LOG
+
+DEFAULT_SRC = "app"        # 手机App / 桌宠走这条；微信那边传 "wechat"
+
+
+def norm_src(src):
+    """把渠道名收拾干净。认不出来的一律当默认渠道 —— 宁可跟 App 混在一起，
+    也别因为一个拼错的字段名开出一份空历史（那边她会失忆，且没有任何提示）。"""
+    s = str(src or "").strip().lower()
+    return s or DEFAULT_SRC
 
 
 def _day_segment(hour):
@@ -273,6 +288,12 @@ class Brain:
         self.max_new_tokens = max_new_tokens
         self.history_turns = history_turns
 
+        # 每个渠道一份对话历史：手机 App 和微信上的她不该互相读到对方的对话。
+        # 键是渠道名（app / wechat / 以后加什么都行），代码里不针对具体渠道写规则。
+        # 必须在 reload_persona 之前建好 —— 那儿会往 self.hist 里写 system 段。
+        self._hists = {}
+        self._cur_src = DEFAULT_SRC
+
         # 人设来自 personas/*.json，由 config.json 的 persona_file 指定
         self.reload_persona(keep_history=False)
 
@@ -280,20 +301,98 @@ class Brain:
         self.last_mode = "API直出"
         self.last_active = None               # 上次对话时间（时间感知用）
 
+    # --- 渠道 ---
+    @property
+    def hist(self):
+        """当前渠道的对话历史。老代码（十几处）直接用 self.hist，
+        不改的话它们会全部落到「当前渠道」上 —— 所以下面每处都先切好 _cur_src。"""
+        return self._hist(self._cur_src)
+
+    @hist.setter
+    def hist(self, value):
+        self._hists[norm_src(self._cur_src)] = value
+
+    # --- 渠道：对话历史按渠道分份 ---
+    def _hist(self, src):
+        """取（必要时建）某个渠道的对话历史。每份第一条固定是 system。"""
+        src = norm_src(src)
+        h = self._hists.get(src)
+        if h is None:
+            h = [{"role": "system", "content": self._persona_text_for(src)}]
+            self._hists[src] = h
+        return h
+
+    def use_src(self, src):
+        """把「当前渠道」切过去。聊天全程串行加锁，所以这里不需要线程局部变量。
+
+        记忆检索也跟着切 —— 这是隔离的关键：她在微信里认得的人和 App 里
+        认得的人若是同一个，记忆反而该共用；配了独立人设时该隔开。
+        现在统一按渠道隔，代价是微信里学到的事不会出现在 App 里。
+        """
+        self._cur_src = norm_src(src)
+        return self._cur_src
+
+    def hist_for(self, src):
+        """对外只读：某渠道的历史（建不建由调用方决定，别让读操作产生副作用）。"""
+        h = self._hists.get(norm_src(src))
+        return h if h is not None else []
+
+    def clear_src_history(self, src):
+        """清掉某个渠道的对话历史（存档文件也删），返回删掉几条。"""
+        src = norm_src(src)
+        n = len(self._hists.get(src) or []) - 1
+        self._hists[src] = [{"role": "system",
+                             "content": self._persona_text_for(src)}]
+        try:
+            os.remove(chat_log_for(src))
+        except OSError:
+            pass
+        return max(0, n)
+
+    # 人设也是按渠道分的：微信那边可能是另一套设定（persona_wechat）。
+    # 没配就退回主渠道那套 —— 宁可跟 App 用同一个人设，也不能让她变成空白。
+    def _persona_key_for(self, src):
+        src = norm_src(src)
+        if src == DEFAULT_SRC:
+            return key_from_config(self.api)
+        extra = {}
+        try:
+            import paths
+            cfg = json.loads(open(paths.CONFIG_PATH, encoding="utf-8").read())
+            extra = cfg.get("persona_by_src") or {}
+        except Exception:
+            extra = {}
+        return str(extra.get(src) or "").strip() or key_from_config(self.api)
+
+    def _persona_text_for(self, src):
+        p = load_persona(self._persona_key_for(src))
+        return build_system_text(p)
+
+    def persona_key_of(self, src=DEFAULT_SRC):
+        return self._persona_key_for(src)
+
     # --- 人设 / 时间 ---
     def reload_persona(self, keep_history=True):
         """重新读取人设（设置窗口保存后调用，热更新，不用重启）。
 
         关系定位跟着人设一起重载 —— 它现在是 persona["relation"] 里的自由文本，
         不是 config 里的档位，所以不单独读。
+
+        每个渠道的 system 段都要换 —— 微信那边可能是另一套人设，
+        只换当前这份的话，切渠道后她会顶着上一套设定开口。
         """
         self.persona = load_persona(key_from_config(self.api))
         self.persona_text = build_system_text(self.persona)
         self.draft_rules = build_draft_rules(self.persona)
-        if keep_history and getattr(self, "hist", None):
-            self.hist[0] = {"role": "system", "content": self.persona_text}
-        else:
-            self.hist = [{"role": "system", "content": self.persona_text}]
+        for src in list(self._hists.keys()):
+            h = self._hists[src]
+            fresh = self._persona_text_for(src)
+            if keep_history and h:
+                h[0] = {"role": "system", "content": fresh}
+            else:
+                self._hists[src] = [{"role": "system", "content": fresh}]
+        # 没有任何渠道的历史时，至少给主渠道建一份（否则第一次聊天是空白）
+        self._hist(self._cur_src)
 
     def _time_hint(self):
         """把当前时间 / 离开时长拼成一句提示，喂给模型。可开关。"""
@@ -555,13 +654,23 @@ class Brain:
             return ""
 
     # --- 对外：说一句话 ---
-    def chat(self, user_text, proactive=False, img=None, log=True):
+    def chat(self, user_text, proactive=False, img=None, log=True, src=None):
         """返回 (她说的话, 模式标签)。模式标签用于排查到底走的哪条路
 
         img：这一轮带的图片路径（有的话会记进聊天存档，手机/App 那边好显示）。
         图片内容本身早就在 user_text 里被描述成文字了 —— 她看不见像素，只看得见描述。
+
+        src：渠道（app / wechat）。决定这轮读哪份人设、哪份对话历史、哪个记忆分区。
+        不传就是主渠道（手机 App）。主动搭话和朋友圈不算渠道对话，走主渠道。
         """
         from memory_store_v2 import MemoryStore, classify_her_speech
+
+        if src and not proactive:
+            self.use_src(src)
+        if proactive:
+            # 主动搭话是"她在跟你说话"，不属于某个渠道 —— 固定落主渠道，
+            # 否则她在手机上冒出来一句话会凭空多一份微信侧历史。
+            self.use_src(DEFAULT_SRC)
 
         memory_block = ""
         # 短句闲聊（"嗯""在吗""哈哈"）不检索：这种话本身没信息量，硬凑出来的
@@ -570,7 +679,8 @@ class Brain:
         if self.mem is not None and len(q) >= 6:
             try:
                 _t1 = time.time()
-                memory_block = self.mem.render(query=q, top_k=5)
+                memory_block = self.mem.render(query=q, top_k=5,
+                                              chan=self._cur_src)
                 print(f"[perf] 记忆检索 {time.time()-_t1:.1f}s", flush=True)
             except Exception:
                 memory_block = ""
@@ -613,6 +723,12 @@ class Brain:
                 break
             her_speech = "\n".join(_ls).strip()
 
+        # 渠道必须在主线程里抓好再传给后台线程：抽取是异步的，等它跑到
+        # _chan = self._cur_src 那一行时，主线程可能已经处理完下一轮、
+        # 把当前渠道切到别处去了 —— 于是记忆被打上别的渠道的标记，
+        # 串得比不隔离还糟（微信侧抽出来的东西进了 App 的记忆库）。
+        _chan = norm_src(self._cur_src)
+
         if self.mem is not None:
             def _extract_bg(her_text=None):
                 try:
@@ -620,10 +736,10 @@ class Brain:
                     nf = ne = 0
                     facts, events, _mode = MemoryStore.extract(user_text, self.api)
                     for k, v in facts:
-                        self.mem.add(f"{k}：{v}", mtype="fact")
+                        self.mem.add(f"{k}：{v}", mtype="fact", chan=_chan)
                         nf += 1
                     for e in events:
-                        self.mem.add(e, mtype="event")
+                        self.mem.add(e, mtype="event", chan=_chan)
                         ne += 1
 
                     # 她自己说的承诺/约定也要记。以前只抽用户的话，于是她说过的
@@ -647,7 +763,8 @@ class Brain:
                                 # 跟对话里应承的不一样，前者大概率是编的，检索到时
                                 # 降权，不当作已经说定的安排
                                 self.mem.add(e, mtype="event",
-                                             src="proactive" if proactive else "chat")
+                                             src="proactive" if proactive else "chat",
+                                             chan=_chan)
                                 saved += 1
                             # 两种"没记下"要分得清：判定不通过 vs 抽取认为不是约定。
                             # 后者常见（"打算先把高数对付过去"是回顾自己，不是承诺），
@@ -701,7 +818,7 @@ class Brain:
             u = {"t": t, "role": "user", "text": user_text}
             if img:
                 u["img"] = img
-            with open(CHAT_LOG, "a", encoding="utf-8") as f:
+            with open(chat_log_for(self._cur_src), "a", encoding="utf-8") as f:
                 f.write(json.dumps(u, ensure_ascii=False) + "\n")
                 for piece in split_messages(ans):
                     f.write(json.dumps({"t": t, "role": "assistant", "text": piece},
@@ -710,13 +827,17 @@ class Brain:
             pass
 
     @staticmethod
-    def read_history(limit=40):
-        """读回聊天存档，返回最近 limit 条（正序）。文件不在就返回空。"""
-        if not os.path.exists(CHAT_LOG):
+    def read_history(limit=40, src=None):
+        """读回聊天存档，返回最近 limit 条（正序）。文件不在就返回空。
+
+        src 不传读主渠道。分渠道后App 只看得到 App 的对话，两边不互相污染。
+        """
+        path = chat_log_for(norm_src(src) if src else DEFAULT_SRC)
+        if not os.path.exists(path):
             return []
         out = []
         try:
-            with open(CHAT_LOG, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -731,7 +852,7 @@ class Brain:
             return []
         return out[-limit:]
 
-    def seed_history(self, limit=16):
+    def seed_history(self, limit=16, src=None):
         """重启后把存档灌回对话历史，让她还记得刚才聊到哪儿。
 
         只灌最近几轮（默认 16 条消息 ≈ 8 个来回）：灌太多会让每轮 prompt
@@ -739,24 +860,34 @@ class Brain:
         必须用存档里的真实时间打标签：把 t 扔掉的话，一排"25 号的票"没有任何
         时间标记，模型只能当成此刻正在谈的事（她"把 4 天前的 25 号当未来"的根源）。
         """
-        msgs = self.read_history(limit)
-        for m in msgs:
-            role = "user" if m.get("role") == "user" else "assistant"
-            text = str(m.get("text") or "")
-            t = str(m.get("t") or "").strip()
-            if len(t) >= 16:
-                # "2026-09-29 06:18" → "[09-29 06:18] "（年份省掉，省点 token）
-                text = "[" + t[5:16] + "] " + text
-            self.hist.append({"role": role, "content": text})
-        if len(self.hist) > self.history_turns + 1:
-            self.hist = [self.hist[0]] + self.hist[-self.history_turns:]
-        return len(msgs)
+        prev = self._cur_src
+        cur = self.use_src(src or DEFAULT_SRC)
+        try:
+            # src 必须显式传下去：read_history 的 src 省略时读的是主渠道，
+            # 而这里正在给非主渠道灌历史 —— 漏传就是把 app 的对话灌进微信侧
+            msgs = self.read_history(limit, cur)
+            for m in msgs:
+                role = "user" if m.get("role") == "user" else "assistant"
+                text = str(m.get("text") or "")
+                t = str(m.get("t") or "").strip()
+                if len(t) >= 16:
+                    # "2026-09-29 06:18" → "[09-29 06:18] "（年份省掉，省点 token）
+                    text = "[" + t[5:16] + "] " + text
+                self.hist.append({"role": role, "content": text})
+            if len(self.hist) > self.history_turns + 1:
+                self.hist = [self.hist[0]] + self.hist[-self.history_turns:]
+            return len(msgs)
+        finally:
+            self.use_src(prev)
 
     @staticmethod
-    def clear_history():
-        """清空聊天记录存档（聊天窗里"清空聊天记录"用）"""
+    def clear_history(src=None):
+        """清空聊天记录存档（聊天窗里"清空聊天记录"用）。
+
+        分渠道后只清那一份 —— 在 App 里清记录不该把微信侧也抹掉。
+        """
         try:
-            os.remove(CHAT_LOG)
+            os.remove(chat_log_for(norm_src(src) if src else DEFAULT_SRC))
             return True
         except OSError:
             return False
@@ -779,13 +910,20 @@ class Brain:
         mood = (scene.get("mood") or "").strip()
         hook = (scene.get("hook") or "").strip()
         source = (scene.get("source") or "").strip()
+        # 主动搭话只属于主渠道：她是看着你的电脑开口的，不是看着微信。
+        # 不切回来的话，上一轮如果停在微信侧，她这句话会落进微信那份历史里，
+        # 而你在手机上根本看不到 —— 等于凭空多了一段她说过的话。
+        # 放在空内容判断之前：早退的那条路同样会把当前渠道留在微信上。
+        self.use_src(DEFAULT_SRC)
+
         if not (what or detail):
             return "", "无内容"
 
         memory_block = ""
         if self.mem is not None:
             try:
-                memory_block = self.mem.render(query=f"{what} {detail}", top_k=4)
+                memory_block = self.mem.render(query=f"{what} {detail}", top_k=4,
+                                              chan=DEFAULT_SRC)
             except Exception:
                 memory_block = ""
 
@@ -855,5 +993,7 @@ class Brain:
                 pass
         return "", "主动搭话失败"
 
-    def reset(self):
-        self.hist = [{"role": "system", "content": self.persona_text}]
+    def reset(self, src=None):
+        """清空内存里的对话历史（存档文件另走 clear_history）。"""
+        self._hists[norm_src(src) if src else DEFAULT_SRC] = [
+            {"role": "system", "content": self.persona_text}]
