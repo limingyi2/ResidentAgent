@@ -535,6 +535,16 @@ class Brain:
                 parts.append("\n" + sb)
         except Exception:
             pass
+        # 插件各自的能力说明（plugins/*.py 的 prompt 钩子）。
+        # 位置贴着 system 末尾：跟人设/记忆那些大块比，这段短，放后面照做率高。
+        # 整段 try/except —— 插件炸了顶多少一段提示词，不能让她一句话都说不出来
+        try:
+            import plugin_host
+            pb = plugin_host.prompt_block()
+            if pb:
+                parts.append(pb)
+        except Exception:
+            pass
         msgs = [{"role": "system", "content": "".join(parts)}]
         for m in self.recent_hist():
             msgs.append(m)

@@ -5,6 +5,8 @@
 新代码一律从这里 import，不要再自己拼 os.path.join。
 
 config/  config.json 主配置、world.json 世界设定、personas/ 人设
+plugins/ 插件：每个 .py 是一个功能块（reminder 闹钟、calc 算数…），
+         加新功能只往这里丢文件，核心代码不改
 data/    memory 记忆库、her_life 经历流、journal 日记、summary 历史摘要、
          chat_history.jsonl 聊天存档、upload 手机发来的图、run 运行时标记
 logs/watchdog.log 看门狗日志        archive/ 备份与旧数据
@@ -18,6 +20,8 @@ CONFIG_DIR = os.path.join(ROOT, "config")
 DATA_DIR = os.path.join(ROOT, "data")
 LOGS_DIR = os.path.join(ROOT, "logs")
 ARCHIVE_DIR = os.path.join(ROOT, "archive")
+# 代码目录，不归上面四类管。插件跟核心代码一起走版本管理，所以放这儿
+PLUGINS_DIR = os.path.join(ROOT, "plugins")
 
 # --- config/：你会手动改的 ---
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
@@ -31,6 +35,7 @@ JOURNAL_DIR = os.path.join(DATA_DIR, "journal")
 SUMMARY_DIR = os.path.join(DATA_DIR, "summary")      # 历史摘要（聊过什么）
 UPLOAD_DIR = os.path.join(DATA_DIR, "upload")
 STICKERS_DIR = os.path.join(DATA_DIR, "stickers")    # 她收藏的表情包
+PLUGIN_DATA_DIR = os.path.join(DATA_DIR, "plugins")  # 插件自己的持久化
 RUN_DIR = os.path.join(DATA_DIR, "run")
 CHAT_LOG = os.path.join(DATA_DIR, "chat_history.jsonl")
 
@@ -61,7 +66,7 @@ WATCHDOG_LOG = os.path.join(LOGS_DIR, "watchdog.log")
 # 会自动建出来的目录
 _DIRS = (CONFIG_DIR, DATA_DIR, LOGS_DIR, ARCHIVE_DIR, PERSONA_DIR,
          MEMORY_DIR, LIFE_DIR, JOURNAL_DIR, SUMMARY_DIR, UPLOAD_DIR,
-         STICKERS_DIR, RUN_DIR)
+         STICKERS_DIR, RUN_DIR, PLUGINS_DIR, PLUGIN_DATA_DIR)
 
 
 def ensure():

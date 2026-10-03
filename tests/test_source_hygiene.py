@@ -16,12 +16,54 @@ import os
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# plugins/ 也要扫：插件是新增功能最容易扎堆的地方，一份文件里写两遍
+# 同一个 helper 就是"后者悄悄赢"，而插件坏了只打一行日志，很难发现
 SCAN_DIRS = ("brain", "pet", "tests")
 
 
 def _defs(body):
+    """这个作用域里定义了的函数名。
+
+    带 @x.setter / @x.deleter 的**要跳过**：属性写法里 getter 和 setter
+    合法地同名（`def hist` + `@hist.setter def hist`），在 AST 里都是
+    FunctionDef，但不构成"后者覆盖前者"。不排除的话每个 property 都会被
+    误报成重复定义（Brain.hist 就有一个，渠道隔离时加的）。
+    """
     return [n.name for n in body
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and not _is_accessor(n)]
+
+
+def _is_accessor(node):
+    """是不是属性的 setter/deleter。
+
+    写法是 `@hist.setter`（不是 `@foo(hist.setter)`），所以装饰器本身就是
+    一个 Attribute 节点，attr 为 setter/deleter。
+    """
+    for d in getattr(node, "decorator_list", []) or []:
+        if isinstance(d, ast.Attribute) and d.attr in ("setter", "deleter"):
+            return True
+    return False
+
+
+def _files():
+    """要扫的 .py 列表，去重且有序。
+
+    brain 用非递归 glob：递归会把 plugins/ 也带上，而 plugins 又在 SCAN_DIRS
+    里显式列着，同一个文件就会报两遍错，测试输出成了噪音。
+    """
+    out = []
+    seen = set()
+    for d, pat in (("brain", "brain/*.py"),
+                   ("brain/plugins", "brain/plugins/*.py"),
+                   ("pet", "pet/*.py"),
+                   ("tests", "tests/*.py")):
+        for p in sorted(glob.glob(os.path.join(ROOT, pat))):
+            rp = os.path.relpath(p, ROOT)
+            if rp not in seen:
+                seen.add(rp)
+                out.append(p)
+    return out
 
 
 def _tree(path):
@@ -37,42 +79,39 @@ class TestNoDuplicateDefinitions(unittest.TestCase):
 
     def test_no_module_defines_a_name_twice(self):
         bad = []
-        for d in SCAN_DIRS:
-            for p in sorted(glob.glob(os.path.join(ROOT, d, "*.py"))):
-                tree = _tree(p)
-                dup = self._dup_in(_defs(tree.body))
-                if dup:
-                    bad.append("%s: %s" % (os.path.relpath(p, ROOT), dup))
+        for p in _files():
+            tree = _tree(p)
+            dup = self._dup_in(_defs(tree.body))
+            if dup:
+                bad.append("%s: %s" % (os.path.relpath(p, ROOT), dup))
         self.assertEqual(bad, [], "同名的顶层函数被定义了两次（后者静默覆盖前者）")
 
     def test_no_class_defines_a_method_twice(self):
         bad = []
-        for d in SCAN_DIRS:
-            for p in sorted(glob.glob(os.path.join(ROOT, d, "*.py"))):
-                tree = _tree(p)
-                for node in tree.body:
-                    if not isinstance(node, ast.ClassDef):
-                        continue
-                    dup = self._dup_in(_defs(node.body))
-                    if dup:
-                        bad.append("%s: %s.%s -> %s"
-                                   % (os.path.relpath(p, ROOT),
-                                      node.name, dup, dup))
+        for p in _files():
+            tree = _tree(p)
+            for node in tree.body:
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                dup = self._dup_in(_defs(node.body))
+                if dup:
+                    bad.append("%s: %s.%s -> %s"
+                               % (os.path.relpath(p, ROOT),
+                                  node.name, dup, dup))
         self.assertEqual(bad, [], "同一个类里重复定义了方法（后者静默覆盖前者）")
 
     def test_nested_functions_are_not_duplicated_either(self):
         """闭包里的同名函数也一样：后定义的赢。"""
         bad = []
-        for d in SCAN_DIRS:
-            for p in sorted(glob.glob(os.path.join(ROOT, d, "*.py"))):
-                tree = _tree(p)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.FunctionDef):
-                        dup = self._dup_in(_defs(node.body))
-                        if dup:
-                            bad.append("%s: %s() 里 -> %s"
-                                       % (os.path.relpath(p, ROOT),
-                                          node.name, dup))
+        for p in _files():
+            tree = _tree(p)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    dup = self._dup_in(_defs(node.body))
+                    if dup:
+                        bad.append("%s: %s() 里 -> %s"
+                                   % (os.path.relpath(p, ROOT),
+                                      node.name, dup))
         self.assertEqual(bad, [])
 
 

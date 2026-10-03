@@ -106,14 +106,32 @@ PROMPT_LINE = ("[tool:ip_city] 查他现在的实时位置；"
 
 
 def run_tool(name, arg):
-    """执行一个工具调用；名字不在册/执行失败都返回 None（让她说查不到）。"""
-    fn = TOOLS.get(str(name or "").lower())
-    if not fn:
-        return None
+    """执行一个工具调用；名字不在册/执行失败都返回 None（让她说查不到）。
+
+    先问核心那三个，再问插件（plugins/ 下各功能块自己带的工具）。
+    插件里的工具名不要跟这三个重名 —— 重名了插件那个永远不会被调到。
+    """
+    n = str(name or "").lower()
+    fn = TOOLS.get(n)
+    if fn:
+        try:
+            return fn(arg) or None
+        except Exception:
+            return None
     try:
-        return fn(arg) or None
+        import plugin_host
+        return plugin_host.run_tool(n, arg)
     except Exception:
         return None
+
+
+def tool_help_extra():
+    """插件工具的用法说明（persona_store 拼进"工具"那一段用）。"""
+    try:
+        import plugin_host
+        return plugin_host.tool_help()
+    except Exception:
+        return ""
 
 
 def run_chat_with_tools(chat_fn, text, max_rounds=2):

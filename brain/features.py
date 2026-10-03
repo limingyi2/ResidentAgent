@@ -3,6 +3,9 @@
 
 读缓存 30 秒 —— 聊天链路每条消息都会问，不能每条都读一次盘；关掉后最多
 30 秒生效。任何读取失败一律当"开"：开关系统自己坏了不能拖累功能。
+
+DEFAULTS 里除核心功能外，插件声明了 FEATURE 的也会登记进来（见 plugin_host），
+这样设置页不用为每个插件改代码，插件删了开关自然消失。
 """
 import json
 import time
@@ -13,7 +16,7 @@ try:
 except Exception:
     _CFG = r"C:\linzhixia\config\config.json"
 
-# 全部开关与默认值（新功能在这里登记；config 里没写就按默认）
+# 核心开关与默认值（插件的由 plugin_host._sync_features 追加）
 DEFAULTS = {
     "hotboard": True,         # 热搜进她的世界
     "weather": True,          # 天气进她的世界
@@ -25,6 +28,21 @@ DEFAULTS = {
 }
 
 _cache = {"t": 0.0, "d": dict(DEFAULTS)}
+
+
+def invalidate():
+    """丢掉 30 秒缓存（插件登记完新开关、或刚写完 config 时调）。"""
+    _cache["t"] = 0.0
+
+
+def register(key, default=True):
+    """登记一个开关（插件装载时调）。已存在不改默认值 —— config 里已有的设置优先。"""
+    key = str(key or "").strip()
+    if not key or key in DEFAULTS:
+        return False
+    DEFAULTS[key] = bool(default)
+    invalidate()
+    return True
 
 
 def all_features():
@@ -58,7 +76,7 @@ def set_features(patch):
         cfg["features"] = f
         with open(_CFG, "w", encoding="utf-8", newline="\n") as fp:
             json.dump(cfg, fp, ensure_ascii=False, indent=2)
-        _cache["t"] = 0
+        invalidate()
         return all_features()
     except Exception:
         return None

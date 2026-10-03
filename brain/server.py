@@ -82,6 +82,11 @@ def build_local_brain(verbose=True):
     from memory_store_v2 import get_default_store
     from brain import Brain
 
+    # 插件必须在 Brain() **之前**装载：人设里的"工具"清单是构造时拼进
+    # draft_rules 的（persona_store._plugin_tools），晚于构造再装载，
+    # 她就少了新插件的工具说明 —— 提示词不会自己补，得重跑 reload_persona
+    load_plugins(verbose=verbose)
+
     mem = get_default_store()
     mode = api_config.get("chat_mode", "api")
     b = Brain(mem, api_config, mode=mode)
@@ -99,6 +104,27 @@ def build_local_brain(verbose=True):
     _attach_life_engine(b, api_config, verbose=verbose)
 
     return b
+
+
+def load_plugins(verbose=False):
+    """装载 brain/plugins/ 下的插件。进程启动时调一次。
+
+    装不上只打一行 —— plugins/ 是空的（大部分时候就是空的）完全不影响聊天。
+    装上了就登记成功能开关，App 设置页会自动多出对应条目。
+    """
+    try:
+        import plugin_host
+    except Exception as e:
+        print(f"[插件] 加载器本身坏了（不影响聊天）：{e}", flush=True)
+        return 0
+    try:
+        got = plugin_host.load(force=True)
+        if verbose and got:
+            print(f"[大脑] 插件：{len(got)} 个已装载", flush=True)
+        return len(got)
+    except Exception as e:
+        print(f"[插件] 装载出错（不影响聊天）：{e}", flush=True)
+        return 0
 
 
 def _attach_life_engine(b, api_config, verbose=False):
@@ -320,6 +346,17 @@ def ask_with_retry(text, img_b64=None, display=None, trace_out=None, src=None):
             ans = resolve_gen_tags(strip_say_marker(ans), look)
             ans = resolve_rand_tags(ans, text)   # [rand:分类] 表情包/趣图
             ans = resolve_voice_tag(ans, API_CFG)
+            # 插件的回复加工（on_reply）：核心那三道加工之后。
+            # 放最后是有意的：插件拿到的已经是"能直接发出去"的文本
+            # （[img:] 已是文件名、[voice:] 已是语音条），不用各自去解标记。
+            # 炸了的插件已被 plugin_host 挡掉，这里拿到的永远是字符串。
+            try:
+                import plugin_host
+                ans = plugin_host.on_reply(
+                    plugin_host.Turn(text=text, src=src, api_config=API_CFG,
+                                     brain=_LOCAL["brain"]), ans)
+            except Exception as e:
+                print(f"[插件] on_reply 跳过（不影响回复）：{e}", flush=True)
             # 存档记处理后的正文（带 [img:gen_xxx.png]，App 能直接显示）。
             # 用户侧只存他真正说的话，看图描述和快递提示别进他的气泡
             try:
@@ -472,14 +509,62 @@ def start_remote_api(brain):
             return _auth_ok(self.headers.get("Authorization") or "",
                             qtok, tok, self.client_address[0])
 
+        def _cors(self):
+            """跨域头：管理仪表盘从 file:// 或其他源访问时需要。
+            鉴权靠 token 兜底，CORS 只放开浏览器侧的读取限制。"""
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods",
+                             "GET, POST, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers",
+                             "Content-Type, Authorization")
+            self.send_header("Access-Control-Max-Age", "86400")
+
         def _json(self, code, out):
             data = json.dumps(out, ensure_ascii=False).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type",
                              "application/json; charset=utf-8")
+            self._cors()
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def do_OPTIONS(self):
+            """CORS 预检：浏览器发带 Authorization 的请求前会先问一声。"""
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _plugin_route(self, method, path, body):
+            """插件的 HTTP 接口。命中返回 True（已经自己回过包）。
+
+            处理函数签名统一 (body, query) -> dict；要发非 200 或纯文本就
+            自己在 ROUTES 里拿 handler 之外的东西做（不鼓励）。查不到返回 False，
+            调用方回 404。
+            """
+            try:
+                import plugin_host
+                tbl = plugin_host.route_table()
+            except Exception:
+                return False
+            for m, p, fn, owner in tbl:
+                if m != method or p != path:
+                    continue
+                try:
+                    from urllib.parse import urlparse, parse_qs
+                    q = parse_qs(urlparse(self.path).query)
+                    q = {k: (v[0] if v else "") for k, v in q.items()}
+                    out = fn(body or {}, q)
+                    if not isinstance(out, dict):
+                        out = {"ok": True, "result": out}
+                    self._json(int(out.pop("_code", 200)), out)
+                except Exception as e:
+                    print(f"[插件] {owner} 的 {path} 出错："
+                          f"{type(e).__name__}: {e}", flush=True)
+                    self._json(500, {"ok": False, "err": str(e)[:120]})
+                return True
+            return False
 
         def do_POST(self):
             if not self._check():
@@ -526,6 +611,19 @@ def start_remote_api(brain):
                         pass
                     try:
                         _proactive_note_user()   # 他说话了：给自适应频率喂反馈
+                    except Exception:
+                        pass
+                    # 插件的入站钩子（on_turn_in）：各插件看一句他说了什么，
+                    # 需要就返回一段要注入 system 的提示（提醒插件靠它把
+                    # "手上还有哪些到点要喊的事"喂进上下文）。
+                    # 拼在系统提示里而不是塞进 _in_text —— 后者会被当他说的话存档。
+                    try:
+                        import plugin_host as _ph
+                        _extra = _ph.on_turn_in(
+                            _ph.Turn(text=_disp, src=_src, api_config=API_CFG,
+                                     brain=_LOCAL["brain"]))
+                        if _extra:
+                            _in_text += "\n" + _extra
                     except Exception:
                         pass
                     _snap = {}
@@ -907,6 +1005,24 @@ def start_remote_api(brain):
                     if cur is None:
                         cur = _feat.all_features()
                     self._json(200, {"features": cur})
+                elif path == "/api/plugins/reload":
+                    # 改完 plugins/ 里的文件不用重启大脑：重扫目录重装。
+                    # 已经起了后台线程的插件**不会**被重启（线程无法二次启动），
+                    # 它们的改动要重启大脑才生效 —— 这点在返回里说清楚
+                    import plugin_host as _ph
+                    n = load_plugins(verbose=True)
+                    has_bg = any(callable(p.hook("start"))
+                                 for p in _ph.all_plugins().values())
+                    b = _LOCAL.get("brain")
+                    # 提示词里的工具清单是构造时拼的，重装后得重拼
+                    if b is not None:
+                        try:
+                            b.reload_persona()
+                        except Exception:
+                            pass
+                    self._json(200, {"ok": True, "count": n,
+                                     "restart_needed": has_bg,
+                                     "plugins": _ph.listing()})
                 elif path == "/api/moment/like":
                     try:
                         import moments
@@ -946,7 +1062,11 @@ def start_remote_api(brain):
                         self._json(200, {"posted": False, "raw": "",
                                          "items": [], "err": str(e)[:120]})
                 else:
-                    self._json(404, {"err": "no such api"})
+                    # 插件自己的接口（ROUTES）。放最后当兜底：核心路由都叫
+                    # /api/xxx，插件要求自己的路径带 /api/plugin/ 前缀，
+                    # 撞名的可能交给名字去管，这里只做精确匹配
+                    if not self._plugin_route("POST", path, body):
+                        self._json(404, {"err": "no such api"})
             except Exception as e:
                 print(f"[大脑] 接口异常 {path}：{type(e).__name__}: {e}",
                       flush=True)
@@ -1110,6 +1230,10 @@ def start_remote_api(brain):
                 # App 设置页读功能开关
                 import features as _feat
                 self._json(200, {"features": _feat.all_features()})
+            elif path == "/api/plugins":
+                # 插件清单：装了哪些、各自有什么能力/工具/接口、开关状态
+                import plugin_host as _ph
+                self._json(200, {"plugins": _ph.listing()})
             elif path == "/api/app/version":
                 # App 内置更新检查：读版本文件（发布新 APK 时一起更新）
                 try:
@@ -1124,6 +1248,7 @@ def start_remote_api(brain):
                     self.send_response(200)
                     self.send_header("Content-Type",
                                      "application/vnd.android.package-archive")
+                    self._cors()
                     self.send_header("Content-Length", str(len(blob)))
                     self.end_headers()
                     self.wfile.write(blob)
@@ -1171,6 +1296,7 @@ def start_remote_api(brain):
                 self.send_header("Content-Type",
                                  _ct.get(os.path.splitext(p)[1].lower(),
                                          "application/octet-stream"))
+                self._cors()
                 self.send_header("Content-Length", str(len(blob)))
                 self.end_headers()
                 self.wfile.write(blob)
@@ -1186,12 +1312,14 @@ def start_remote_api(brain):
                          ".webp": "image/webp"}.get(ext, "image/jpeg")
                 self.send_response(200)
                 self.send_header("Content-Type", ctype)
+                self._cors()
                 self.send_header("Content-Length", str(len(blob)))
                 self.end_headers()
                 self.wfile.write(blob)
                 return
             else:
-                self._json(404, {"err": "no such api"})
+                if not self._plugin_route("GET", path, {}):
+                    self._json(404, {"err": "no such api"})
 
         def log_message(self, *a):
             pass
@@ -1233,6 +1361,13 @@ def run_server():
                   flush=True)
         # 她的全部"生活"：生活补算 / 历史摘要 / 朋友圈 / 主动搭话 / 事件提醒
         start_background(_LOCAL["brain"])
+        # 插件（plugins/）：装完就起后台线程。装载失败只少几个功能，不影响主服务
+        try:
+            import plugin_host
+            plugin_host.start_all(_LOCAL["brain"])
+        except Exception as e:
+            print("[插件] 启动失败（不影响聊天）：%s" % str(e)[:120],
+                  flush=True)
 
     print("=" * 58, flush=True)
     print(" 云端大脑", flush=True)
