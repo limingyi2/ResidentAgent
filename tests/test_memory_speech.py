@@ -350,6 +350,45 @@ class TestHerPromiseExtract(unittest.TestCase):
         self.assertEqual(mode, "api")
 
 
+class TestFixThirdPerson(unittest.TestCase):
+    """_fix_third_person：两侧都要过，且方向不能弄反
+
+    实测踩过：原来只给承诺侧加兜底，用户侧抽出来的「地点由我（助手）决定」照样入库。
+    后来修成无脑把「我」全换成「她」，又会把用户的事写成她的（库里有条
+    「今天学习了Python一天」是用户的，主语不能反）。
+    """
+
+    def test_both_sides_pass_through(self):
+        import inspect
+        src_a = inspect.getsource(M.MemoryStore.extract_with_api)
+        src_b = inspect.getsource(M.MemoryStore.extract_her_promise)
+        self.assertIn("_fix_third_person", src_a, "用户侧没过兜底")
+        self.assertIn("_fix_third_person", src_b)
+
+    def test_subject_direction_differs(self):
+        """用户侧换「他」，承诺侧换「她」—— 反了就把用户的事写成她的。"""
+        t = "国庆回来后与用户见面，地点由我（助手）决定"
+        self.assertIn("由他决定", M._fix_third_person(t, "他"))
+        self.assertIn("由她决定", M._fix_third_person(t, "她"))
+
+    def test_bare_first_person_is_left_alone(self):
+        """"我今天学习了Python一天" 说的是用户自己，不该换主语。
+
+        抽取结果描述的是「谁做了什么」，主语归属由模型定，代码只管清理
+        第三方口吻（「我（助手）」）和自称代词（「我来」→「他来」）。
+        """
+        for t in ("我今天学习了Python一天", "我明天下午三点去看书"):
+            self.assertEqual(M._fix_third_person(t, "他"), t)
+
+    def test_self_reference_is_fixed(self):
+        self.assertEqual(M._fix_third_person("明天我来接他", "他"), "明天他来接他")
+        self.assertEqual(M._fix_third_person("我来接你", "她"), "她来接你")
+
+    def test_fact_text_untouched(self):
+        for t in ("喜好：喜欢猫", "用户想应聘某家公司", "她和他国庆在公园见面。"):
+            self.assertEqual(M._fix_third_person(t, "他"), t)
+
+
 class TestBrainWiring(unittest.TestCase):
     """brain.py 接线：主动搭话也抽取、剥前缀只做一次"""
 

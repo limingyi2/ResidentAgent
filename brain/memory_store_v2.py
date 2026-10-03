@@ -88,6 +88,37 @@ _PAST_MARK = (
 _FORECAST = ("出门记得", "记得穿", "带伞", "天气", "气温", "度", "下雨", "降温")
 
 
+def _fix_third_person(text, subject="她"):
+    """把抽出来的记忆改成第三人称，去掉「我（助手）」这类口吻。
+
+    抽取提示词里要求统一第三人称，但模型偶尔会写成"地点由我（助手）决定"
+    —— 实测两侧都出现过。存进记忆库后注入上下文时，她读到会以为有人在说自己。
+    提示词不是保证，这里兜一次。
+
+    subject: "她" = 抽她的话（她的承诺）；"他" = 抽用户的话（他的事）。
+    ⚠️ 别混用 —— 用户侧提示词原本没规定主语，抽出来常是"我今天学习了Python一天"，
+    统一换成"她"会把她写成学习的人，主语就反了（实测库里那条就是用户的）。
+    """
+    e = str(text)
+    for bad, good in (
+        ("（助手）", ""), ("(助手)", ""), ("（AI）", ""), ("(AI)", ""),
+        (f"我（{subject}）", subject), (f"我({subject})", subject),
+    ):
+        e = e.replace(bad, good)
+    # "由我决定"这类固定搭配：替换掉我 → subject
+    for bad, good in (
+        ("由我决定", f"由{subject}决定"), ("我决定", f"{subject}决定"),
+        ("我来", f"{subject}来"), ("我定", f"{subject}定"),
+        ("我安排", f"{subject}安排"), ("我约", f"{subject}约"),
+    ):
+        e = e.replace(bad, good)
+    # 残留的"我"只在自称语境下换。别整句无脑替换 —— "我喜欢猫"是用户的事，
+    # 换错了主语就反了。判据是"我"后面紧跟动词，不是名词。
+    if subject:
+        e = re.sub(r"我(?=[要会想能去来约定说做准备安排])", subject, e)
+    return e.strip()
+
+
 def classify_her_speech(text):
     """判断她说的这句话该不该进记忆库。
 
@@ -823,8 +854,10 @@ class MemoryStore:
             if content.startswith("```"):
                 content = re.sub(r"^```(?:json)?|```$", "", content, flags=re.M).strip()
             data = json.loads(content)
-            facts = [(f.get("key", ""), f.get("value", "")) for f in data.get("facts", []) if f.get("value")]
-            events = [e for e in data.get("events", []) if e]
+            facts = [(f.get("key", ""), _fix_third_person(f.get("value"), "他"))
+                     for f in data.get("facts", []) if f.get("value")]
+            events = [_fix_third_person(e, "他")
+                      for e in data.get("events", []) if e]
             return facts, events
         except Exception:
             return None
@@ -911,18 +944,8 @@ class MemoryStore:
             for e in data.get("events", []):
                 if not e:
                     continue
-                e = str(e)
-                # 提示词里要求第三人称，但模型偶尔会写成"我（助手）决定"这种
-                # 第三方转述 —— 那样注入上下文时她读到会以为有人在说自己。
-                # 提示词不是保证，这里做一次兜底替换。
-                if any(w in e for w in ("（助手）", "(助手)", "助手决定",
-                                        "AI决定", "AI 决定", "由我决定")):
-                    e = e.replace("（助手）", "").replace("(助手)", "")
-                    e = e.replace("我决定", "她决定")
-                for bad, good in (("由我（助手）", "由她"), ("我（助手）", "她"),
-                                  ("由我决定", "由她决定"), ("我来", "她来")):
-                    e = e.replace(bad, good)
-                if e.strip():
+                e = _fix_third_person(e)
+                if e:
                     events.append(e)
             return events, [], "api"
         except Exception:
