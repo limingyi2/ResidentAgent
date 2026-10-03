@@ -611,6 +611,32 @@ def start_remote_api(brain):
                         self._json(200, {"ok": False, "err": "她正忙着"})
                         return
                     self._json(200, {"ok": True})
+                elif path == "/api/persona/save":
+                    # 保存人设字段。与切换人设不同：改的是当前这套的文件本身。
+                    # 落盘 + 热重载两处都要，只改一处会出现"界面变了、她没变"
+                    try:
+                        import persona_store
+                        key = os.path.basename(str(body.get("key") or "")
+                                               or persona_store.key_from_config(api_config))
+                        if not key or not os.path.isfile(persona_store.path_of(key)):
+                            self._json(200, {"ok": False, "err": "没有这套人设"})
+                            return
+                        fields = body.get("fields")
+                        if not isinstance(fields, dict):
+                            self._json(200, {"ok": False, "err": "字段不对"})
+                            return
+                        name = str(fields.get("name") or "").strip()
+                        if not name:
+                            self._json(200, {"ok": False, "err": "总得有个名字"})
+                            return
+                        persona_store.save(fields, key)
+                        with _chat_lock():
+                            brain.reload_persona()
+                        print("[大脑] 人设已更新：%s" % name, flush=True)
+                        self._json(200, {"ok": True, "name": name})
+                    except Exception as e:
+                        errlog.log_exc("api/persona/save", e)
+                        self._json(200, {"ok": False, "err": str(e)[:120]})
                 elif path == "/api/persona/apply":
                     # 改 config.json 的 persona_file 再热重载。key 只认 personas/
                     # 下已有的文件名（防路径穿越）
@@ -644,31 +670,6 @@ def start_remote_api(brain):
                               flush=True)
                         self._json(200, {"ok": True, "name": her})
                     except Exception as e:
-                        self._json(200, {"ok": False, "err": str(e)[:80]})
-                elif path == "/api/relation/apply":
-                    # 切关系档（friend/partner）。与人设切换同理：落盘 + 改内存
-                    # 两处都要，只改一处会出现"界面变了、她没变"
-                    try:
-                        import persona_store
-                        rel = str(body.get("relation") or "").strip().lower()
-                        if rel not in persona_store.RELATIONS:
-                            self._json(200, {"ok": False, "err": "没有这个关系档"})
-                            return
-                        cfg = {}
-                        try:
-                            cfg = json.load(open(config_path(), encoding="utf-8"))
-                        except Exception:
-                            cfg = {}
-                        cfg["relation"] = rel
-                        with open(config_path(), "w", encoding="utf-8") as f:
-                            json.dump(cfg, f, ensure_ascii=False, indent=2)
-                        api_config["relation"] = rel
-                        with _chat_lock():
-                            brain.reload_persona()
-                        print("[大脑] 关系已切为 %s" % rel, flush=True)
-                        self._json(200, {"ok": True, "relation": rel})
-                    except Exception as e:
-                        errlog.log_exc("api/relation/apply", e)
                         self._json(200, {"ok": False, "err": str(e)[:80]})
                 elif path == "/api/voice/apply":
                     # 同人设切换，但内存里要同步两处：api_config 和 API_CFG
@@ -856,7 +857,27 @@ def start_remote_api(brain):
                 return
             note_client_ip(self.client_address[0])
             path = self.path.split("?")[0]
-            if path == "/api/persona":
+            if path == "/api/persona/full":
+                # 给人设编辑器用：读人设的全部字段（不是摘要）。
+                # 放GET 分支：编辑器只是读，POST 那条路留给 save。
+                try:
+                    import persona_store
+                    from urllib.parse import urlparse, parse_qs
+                    _q = parse_qs(urlparse(self.path).query)
+                    key = (_q.get("key") or [None])[0]
+                    # key 来自查询串，走 basename + isfile双重校验，防路径穿越
+                    cur = os.path.basename(str(key)) if key else \
+                        persona_store.key_from_config(api_config)
+                    if not cur or not os.path.isfile(persona_store.path_of(cur)):
+                        self._json(200, {"ok": False, "err": "没有这套人设"})
+                        return
+                    _p = persona_store.load(cur)
+                    self._json(200, {"ok": True, "key": cur,
+                                     "fields": {k: _p.get(k) for k in
+                                                persona_store.FIELDS}})
+                except Exception as e:
+                    self._json(200, {"ok": False, "err": str(e)[:80]})
+            elif path == "/api/persona":
                 # App 设置页的人设切换要用：当前是哪套 + 有哪些预设
                 import persona_store
                 name = ""
@@ -883,11 +904,8 @@ def start_remote_api(brain):
                 except Exception:
                     pass
                 self._json(200, {"name": name, "key": cur, "presets": presets,
-                                 "relation": persona_store.relation_of(api_config),
-                                 "relations": [{"key": k,
-                                                "label": "伴侣 · 在谈" if k == "partner"
-                                                else "朋友 · 老同学"}
-                                               for k in persona_store.RELATIONS]})
+                                 "relation": persona_store.relation_of(
+                                     persona_store.load(cur))})
             elif path == "/api/voices":
                 # 清单是 VOICE_CATALOG 里的死数据，不联网 —— 设置页必须永远打得开
                 try:

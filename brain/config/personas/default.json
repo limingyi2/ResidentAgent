@@ -1,11 +1,12 @@
 {
-  "_说明": "这是人设文件。**仓库里不预置任何角色 —— 这一份是空模板，你自己填。** 每个字段都是必填（除 call_user 和 notes），留空她就没有背景故事可言。填完改 config.json 的 persona_file 指向它（默认 default.json）。也可以在 App 设置页 / 桌宠设置窗口里直接改，改完自动存回本目录。想多存几套就复制多份，persona_store.list() 会把它们都列出来。字段说明见 brain/persona_store.py 顶部的 docstring。",
+  "_说明": "这是人设文件。字段全部由你在App 设置页里填，不用手改这个文件。relation 是「你们是什么关系」，写什么都行（十年老友 / 正在追她 / 同居两年），但别留空——留空她就没分寸，会在太生分和过度亲密之间飘。想多存几套就复制多份，persona_store.list() 会把它们都列出来。字段顺序和说明见 brain/persona_store.py 顶部的 docstring。",
   "name": "",
   "nicknames": [],
   "background": "",
   "scene": "",
   "personality": "",
   "call_user": "",
+  "relation": "",
   "notes": "",
   "appearance": ""
 }

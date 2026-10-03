@@ -12,7 +12,7 @@ import httpx
 
 from persona_store import (
     load as load_persona, build_system_text, build_draft_rules,
-    key_from_config, relation_of, DEFAULT_PERSONA,
+    key_from_config, DEFAULT_PERSONA,
 )
 
 # 人设来自 personas/*.json，改那边就行；这两个只作默认值兜底
@@ -288,8 +288,7 @@ class Brain:
         两者是独立的两个维度，切关系不该要求重启。
         """
         self.persona = load_persona(key_from_config(self.api))
-        self.relation = relation_of(self.api)
-        self.persona_text = build_system_text(self.persona, self.relation)
+        self.persona_text = build_system_text(self.persona)
         self.draft_rules = build_draft_rules(self.persona)
         if keep_history and getattr(self, "hist", None):
             self.hist[0] = {"role": "system", "content": self.persona_text}
