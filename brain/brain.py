@@ -597,25 +597,11 @@ class Brain:
         _failed = (self.last_mode == "API失败")
 
         # 记忆抽取挪到后台：提取 API 一旦慢（25s 超时）也不能拖住回复
-        if self.mem is not None and not proactive:
-            def _extract_bg():
-                try:
-                    _t = time.time()
-                    facts, events, _mode = MemoryStore.extract(user_text, self.api)
-                    for k, v in facts:
-                        self.mem.add(f"{k}：{v}", mtype="fact")
-                    for e in events:
-                        self.mem.add(e, mtype="event")
-                    print(f"[perf] 后台记忆抽取+写入 {time.time()-_t:.1f}s "
-                          f"(facts={len(facts)}, events={len(events)})", flush=True)
-                except Exception as e:
-                    print(f"[perf] 后台记忆抽取失败：{str(e)[:80]}", flush=True)
-            threading.Thread(target=_extract_bg, daemon=True).start()
-
-        # 主动搭话的输入是「说/无」决策提示词，不能进历史 —— 否则正常聊天会
-        # 模仿这个格式、回出「说 xxx」开头。历史里只留她的正文，答「无」就都不记。
-        if proactive:
-            _ls = (ans or "").splitlines()
+        # 主动搭话的输入是「说/无」决策提示词，要抽记忆得先剥掉那个前缀，
+        # 否则抽到的是"说 xxx"而不是她的正文。
+        her_speech = ans if proactive else None
+        if proactive and her_speech:
+            _ls = (her_speech or "").splitlines()
             for _i, _l in enumerate(_ls):
                 _s = _l.strip()
                 if not _s:
@@ -626,7 +612,62 @@ class Brain:
                         or _s.startswith("说:"):
                     _ls[_i] = _s[1:].lstrip(" ：:")
                 break
-            _clean = "\n".join(_ls).strip()
+            her_speech = "\n".join(_ls).strip()
+
+        if self.mem is not None:
+            def _extract_bg(her_text=None):
+                try:
+                    _t = time.time()
+                    nf = ne = 0
+                    facts, events, _mode = MemoryStore.extract(user_text, self.api)
+                    for k, v in facts:
+                        self.mem.add(f"{k}：{v}", mtype="fact")
+                        nf += 1
+                    for e in events:
+                        self.mem.add(e, mtype="event")
+                        ne += 1
+
+                    # 她自己说的承诺/约定也要记。以前只抽用户的话，于是她说过的
+                    # "明天去望江楼拍银杏"她自己也检索不到，回过头来只能编一个
+                    # 别的（实测编过"下午那个高铁"）。先按语气过滤：假设句、玩笑、
+                    # 天气播报都不进。
+                    saved = 0
+                    if her_text:
+                        # 逐行判断，不只看第一句。她一回常是两段：
+                        # "行，你复习你的高数去吧。" + "我下午正好闲着，…明天望江楼用。"
+                        # 承诺常在第二句，只看第一句等于白抽（实测 hers=0 的原因）。
+                        for ln in [x.strip() for x in her_text.splitlines() if x.strip()]:
+                            ok, why = classify_her_speech(ln)
+                            if not ok:
+                                print(f"[记忆] 她这句不记（{why}）：{ln[:30]}",
+                                      flush=True)
+                                continue
+                            ev, _f, _m = MemoryStore.extract_her_promise(ln, self.api)
+                            for e in ev:
+                                # 标来源：主动搭话里凭空冒出来的（"下午那个高铁"）
+                                # 跟对话里应承的不一样，前者大概率是编的，检索到时
+                                # 降权，不当作已经说定的安排
+                                self.mem.add(e, mtype="event",
+                                             src="proactive" if proactive else "chat")
+                                saved += 1
+                            # 两种"没记下"要分得清：判定不通过 vs 抽取认为不是约定。
+                            # 后者常见（"打算先把高数对付过去"是回顾自己，不是承诺），
+                            # 混在一起看日志会以为抽取坏了。
+                            if ok and not ev:
+                                print(f"[记忆] 不是约定，不记：{ln[:30]}",
+                                      flush=True)
+                    print(f"[perf] 后台记忆抽取+写入 {time.time()-_t:.1f}s "
+                          f"(facts={nf}, events={ne}, hers={saved})", flush=True)
+                except Exception as e:
+                    print(f"[perf] 后台记忆抽取失败：{str(e)[:80]}", flush=True)
+            threading.Thread(target=_extract_bg,
+                             args=(her_speech,), daemon=True).start()
+
+        # 主动搭话的输入是「说/无」决策提示词，不能进历史 —— 否则正常聊天会
+        # 模仿这个格式、回出「说 xxx」开头。历史里只留她的正文，答「无」就都不记。
+        if proactive:
+            # her_speech 上面已经剥过前缀了，别再来一遍
+            _clean = her_speech or ""
             if _clean and _clean != "无" and not _failed:
                 self.hist.append({"role": "assistant",
                                   "content": self._stamp() + _clean})
