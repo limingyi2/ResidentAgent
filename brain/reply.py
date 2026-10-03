@@ -29,21 +29,49 @@ def strip_say_marker(text):
     return "\n".join(lines).strip()
 
 
+# 情绪标记：她想说语音时，在话后面用（语气：xxx）标一下，合成前抽走当
+# TTS 的 instruction。不走 [voice:xxx] 那种改标记格式的路 ——
+# [voice:文件名] 是前端解析音频的协议（chat.html 里
+# /\[voice[:：]([^\]]+)\]/ 取出来就是 name 参数），动它三处联动，容易碎。
+#
+# 用半角括号而不是【】：（）在聊天里更自然，她不太会主动用方括号；
+# 剥离时两种都收（模型偶尔会换成【语气：xxx】）。
+_MOOD_RE = re.compile(r"[（(\[【]\s*(?:语气|情绪|口吻)\s*[:：]\s*([^）)\]】]{1,40})"
+                      r"\s*[）)\]】]")
+
+
+def extract_mood(text):
+    """从正文里抽出情绪描述。返回 (剥掉标记后的正文, 情绪描述)。
+
+    抽不出来就返回原文和空串 —— 那样退回平读，不会因此不发语音。
+    一次只取第一个标记：一句语音一个语气，本来也只该有一个。
+    """
+    raw = text or ""
+    m = _MOOD_RE.search(raw)
+    if not m:
+        return raw, ""
+    return _MOOD_RE.sub("", raw, count=1).strip(), m.group(1).strip()
+
+
 def resolve_voice_tag(text, api_config):
     """把回复里的 [voice] 标记变成真语音条。
 
     她只在想用声音说的时候加这个标记。命中后把整段文字合成为 mp3，替换成
     `[voice:文件名]`，App 渲染成可播放的语音条。合成失败就把标记悄悄去掉、正文照发
     —— 语音是锦上添花，不能反过来害消息发不出去。
+
+    正文里的（语气：xxx）在合成前抽走：它给 TTS 当 instruction，不该出现在
+    语音条下方的转写文字里。
     """
     raw = (text or "")
     if "[voice]" not in raw and "[语音]" not in raw:
         return raw
+    raw, mood = extract_mood(raw)
     spoken = raw.replace("[voice]", "").replace("[语音]", "").strip()
     spoken = re.sub(r"\n+", " ", spoken)
     try:
         import voice
-        name = voice.synth(spoken, api_config)
+        name = voice.synth(spoken, api_config, instruction=mood)
     except Exception as e:
         print("[语音] 调用失败：%s" % str(e)[:120], flush=True)
         name = ""

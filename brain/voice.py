@@ -54,6 +54,8 @@ SF_MODEL = "FunAudioLLM/CosyVoice2-0.5B"
 SF_VOICE = "diana"
 
 MAX_CHARS = 80          # 一条语音的文本上限，超过截断（语音条太长听着烦，也更贵）
+MAX_INSTR_CHARS = 80    # 情绪指令上限。这段是给 TTS 的提示，写太长反而抓不住重点，
+                        # 而且它是提示注入面 —— 收窄到一句话的长度
 
 _VOICE_CACHE = {}
 
@@ -79,31 +81,38 @@ VOICE_CATALOG = [
     {"key": "zv_piper", "label": "绝区零 · 派派", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "zvpiper",
      "voice": "qwen-audio-3.1-tts-flash-zvpiper-246bc40bf08d47699b80bf7ac23f7e6b",
+     "instruction": "慵懒犯困，尾音往下掉，句子之间停顿长一点",
      "desc": "慵懒、尾音往下掉，适合她犯困或撒娇"},
     {"key": "gs_xiangling", "label": "原神 · 香菱", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "gsxiangl",
      "voice": "qwen-audio-3.1-tts-flash-gsxiangl-a2a7b35d78884d13ac6336778a8a4c41",
+     "instruction": "元气，语速偏快，语气上扬，像刚想到什么急着说",
      "desc": "亮、脆、语速偏快，元气路线"},
     {"key": "zv_cecilia", "label": "绝区零 · Cecilia", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "zvcecili",
      "voice": "qwen-audio-3.1-tts-flash-zvcecili-c94de5e639894890bcbf6723498d77c8",
+     "instruction": "偏冷静，咬字清楚，音量不大，像在旁边平静地说",
      "desc": "偏冷、咬字清楚，安静说话时最好听"},
     {"key": "gs_barbara", "label": "原神 · 芭芭拉", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "gsbarbar",
      "voice": "qwen-audio-3.1-tts-flash-gsbarbar-0f68a5df77f449aea257986f3b632fec",
+     "instruction": "甜美轻快，语气软一点，不要太用力",
      "desc": "甜美偏亮；参考音频当年做过 24kHz 无损转换"},
     {"key": "gs_ganyu", "label": "原神 · 甘雨", "group": "二游角色",
      "provider": "aliyun", "model": ALI_MODEL, "name": "gsganyu",
      "voice": "qwen-audio-3.1-tts-flash-gsganyu-7ef9ebe5858c4668bc01434ca2293754",
+     "instruction": "温柔偏低，不着急，长句子读稳一点",
      "desc": "温柔偏低，长句子最稳"},
 
     {"key": "moning_01", "label": "莫宁", "group": "你自己录的",
      "provider": "aliyun", "model": ALI_MODEL, "name": "moning",
      "voice": "qwen-audio-3.1-tts-flash-moning-b17d12e4e1544238933058b067824d95",
+     "instruction": "语气随意，像跟熟人发消息，不用刻意，语速自然",
      "desc": "人味最足，长句子也稳；2026-10-01 重录版（电平比初版好）"},
     {"key": "jiabeilina_v2", "label": "嘉贝莉娜", "group": "你自己录的",
      "provider": "aliyun", "model": ALI_MODEL, "name": "jblina",
      "voice": "qwen-audio-3.1-tts-flash-jblina-24bdbe99164b459f99d3b2da87157214",
+     "instruction": "声音压低一点，语速慢半拍，语气淡淡的",
      "desc": "音色偏暗偏低，反差感强"},
 ]
 
@@ -172,6 +181,14 @@ def apply(cfg, key):
     sub["provider"] = it.get("provider") or DEFAULT_PROVIDER
     sub["model"] = it.get("model") or ALI_MODEL
     sub["voice"] = it["voice"]
+    # 基线情绪跟着音色一起换。不清掉旧的：切回旧音色时会留着上一条，
+    # 而那条对这个音色不一定合适。硅基那条没有基线（它不吃 instruction），
+    # 顺手把 key 删掉，免得留下一个接口根本不认的字段。
+    instr = it.get("instruction")
+    if instr:
+        sub["instruction"] = instr
+    else:
+        sub.pop("instruction", None)
     return sub, "%s（%s）" % (it["label"], it["name"])
 
 
@@ -294,9 +311,14 @@ def describe(cfg=None):
     return "%s · %s : %s" % (short, model, label)
 
 
-def _cache_path(text, provider, model, voice, ext="mp3"):
-    """缓存 key 必须含 provider —— 换平台后同一句话/同一个 label 会撞上旧文件。"""
-    key = hashlib.md5(("%s|%s|%s|%s" % (provider, text, model, voice))
+def _cache_path(text, provider, model, voice, ext="mp3", instruction=""):
+    """缓存 key 必须含 provider —— 换平台后同一句话/同一个 label 会撞上旧文件。
+
+    也必须含 instruction：同一句话用不同情绪合成是两个不同的声音，
+    不带进 key 的话第二条会直接命中第一条的缓存，听着还是没变化。
+    """
+    key = hashlib.md5(("%s|%s|%s|%s|%s" % (provider, text, model, voice,
+                                            instruction or ""))
                       .encode("utf-8")).hexdigest()[:16]
     return os.path.join(VOICE_DIR, "v_%s.%s" % (key, ext))
 
@@ -310,8 +332,13 @@ def _ext_of(fmt):
     return "mp3"
 
 
-def synth(text, api_config, timeout=90):
+def synth(text, api_config, timeout=90, instruction=""):
     """合成语音，返回文件名（如 v_ab12cd34.mp3）；失败返回 ""。
+
+    instruction 是情绪指令（"犯困、尾音往下掉"这类），直接透传给阿里的
+    input.instruction。**不给它就是平读** —— TTS 拿到没有情绪指令的文本
+    会照着念，像播报，这是"听着假"的最大来源。空的时候退到 config 里的
+    静态 instruction（音色目录没设就是没有）。
 
     失败就让上层把 [voice] 标记去掉、退回发文字 —— 绝不能因为语音失败害她整条消息发不出去。
     """
@@ -323,25 +350,28 @@ def synth(text, api_config, timeout=90):
         return ""
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS]
+    instr = str(instruction or "").strip()[:MAX_INSTR_CHARS]
 
     prov = str(vcfg.get("provider") or DEFAULT_PROVIDER).lower()
     if prov == "aliyun":
-        return _synth_aliyun(text, vcfg, api_config, timeout)
+        return _synth_aliyun(text, vcfg, api_config, timeout, instr)
 
     # --- 旧平台（硅基）：OpenAI 兼容，响应体直接就是音频字节 ---
     return _synth_siliconflow(text, api_config, vcfg, timeout)
 
 
-def _synth_aliyun(text, vcfg, api_config, timeout):
+def _synth_aliyun(text, vcfg, api_config, timeout, instruction=""):
     base, key = ali_creds(api_config)
     if not key:
         print("[语音] 阿里侧没配 key（config.voice.aliyun.api_key），跳过", flush=True)
         return ""
     model = vcfg.get("model") or ALI_MODEL
     fmt = str(vcfg.get("format") or ALI_FORMAT).lower()
-    path = _cache_path(text, "aliyun", model, vcfg.get("voice") or "", _ext_of(fmt))
+    instr = str(instruction or "").strip() or str(vcfg.get("instruction") or "").strip()
+    path = _cache_path(text, "aliyun", model, vcfg.get("voice") or "",
+                       _ext_of(fmt), instr)
     if os.path.exists(path) and os.path.getsize(path) > 1024:
-        return os.path.basename(path)     # 同一句话不重复花钱
+        return os.path.basename(path)     # 同一句+同一情绪不重复花钱
 
     os.makedirs(VOICE_DIR, exist_ok=True)
     body = {"model": model, "input": {
@@ -349,8 +379,8 @@ def _synth_aliyun(text, vcfg, api_config, timeout):
         "voice": vcfg.get("voice"),        # voice_id 原样传，**不能加模型名前缀**
         "format": fmt,
         "sample_rate": int(vcfg.get("sample_rate") or ALI_SAMPLE_RATE)}}
-    if vcfg.get("instruction"):
-        body["input"]["instruction"] = str(vcfg["instruction"])
+    if instr:
+        body["input"]["instruction"] = str(instr)[:MAX_INSTR_CHARS]
     try:
         r = httpx.post(base + "/services/audio/tts/SpeechSynthesizer",
                        headers={"Authorization": "Bearer " + key,
