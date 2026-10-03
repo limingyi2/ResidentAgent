@@ -1,0 +1,1410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>知夏 · 管理仪表盘</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23e5497f'/><text x='50' y='68' font-size='50' text-anchor='middle' fill='white' font-family='sans-serif'>夏</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+/* ===== 设计 Token ===== */
+:root {
+  --brand: #e5497f;
+  --brand-light: #ffe3ec;
+  --brand-dark: #c93a6b;
+  --sidebar-bg: #1a1d29;
+  --sidebar-hover: #252836;
+  --sidebar-active: #2d3142;
+  --sidebar-text: #8b8fa3;
+  --sidebar-text-active: #fff;
+  --bg: #f4f5f7;
+  --card-bg: #fff;
+  --border: #e8e9ed;
+  --text: #1f2330;
+  --text-secondary: #6b7080;
+  --text-muted: #9ca0ad;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.08);
+  --mono: "SF Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { height:100%; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; background:var(--bg); color:var(--text); font-size:14px; line-height:1.5; }
+body { display:flex; overflow:hidden; }
+
+/* ===== 侧边栏 ===== */
+.sidebar { width:220px; background:var(--sidebar-bg); display:flex; flex-direction:column; flex-shrink:0; height:100vh; }
+.sidebar-brand { padding:20px 18px 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,.06); }
+.sidebar-brand .logo { width:34px; height:34px; border-radius:8px; background:var(--brand); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:16px; flex-shrink:0; }
+.sidebar-brand .name { color:#fff; font-size:15px; font-weight:600; }
+.sidebar-brand .sub { color:var(--sidebar-text); font-size:11px; margin-top:1px; }
+.sidebar-nav { flex:1; overflow-y:auto; padding:10px 0; }
+.nav-group { padding:8px 18px 4px; font-size:10.5px; color:var(--sidebar-text); text-transform:uppercase; letter-spacing:1px; opacity:.6; }
+.nav-item { display:flex; align-items:center; gap:10px; padding:9px 18px; color:var(--sidebar-text); cursor:pointer; font-size:13.5px; transition:all .15s; border-left:3px solid transparent; user-select:none; }
+.nav-item:hover { background:var(--sidebar-hover); color:#d0d3e0; }
+.nav-item.active { background:var(--sidebar-active); color:var(--sidebar-text-active); border-left-color:var(--brand); }
+.nav-item svg { width:17px; height:17px; flex-shrink:0; }
+.nav-item .badge { margin-left:auto; background:var(--danger); color:#fff; font-size:10px; padding:1px 6px; border-radius:10px; min-width:18px; text-align:center; }
+
+.sidebar-footer { padding:14px 18px; border-top:1px solid rgba(255,255,255,.06); font-size:11px; color:var(--sidebar-text); }
+.sidebar-footer .status-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--success); margin-right:6px; vertical-align:middle; }
+.sidebar-footer .status-dot.offline { background:var(--danger); }
+
+/* ===== 主区域 ===== */
+.main { flex:1; display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+
+/* 顶栏 */
+.topbar { height:54px; background:var(--card-bg); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 24px; gap:16px; flex-shrink:0; }
+.topbar .page-title { font-size:16px; font-weight:600; }
+.topbar .spacer { flex:1; }
+.topbar .conn-status { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); }
+.topbar .conn-status .dot { width:7px; height:7px; border-radius:50%; background:var(--success); }
+.topbar .conn-status .dot.offline { background:var(--danger); }
+.topbar input[type="text"], .topbar input[type="password"] { height:32px; border:1px solid var(--border); border-radius:var(--radius-sm); padding:0 10px; font-size:12.5px; outline:none; background:var(--bg); width:160px; }
+.topbar input:focus { border-color:var(--brand); background:#fff; }
+.topbar button { height:32px; padding:0 14px; border:none; border-radius:var(--radius-sm); background:var(--brand); color:#fff; font-size:12.5px; cursor:pointer; }
+.topbar button:hover { background:var(--brand-dark); }
+.topbar button.ghost { background:transparent; color:var(--text-secondary); border:1px solid var(--border); }
+.topbar button.ghost:hover { background:var(--bg); color:var(--text); }
+
+/* 内容区 */
+.content { flex:1; overflow-y:auto; padding:22px 24px; }
+.view { display:none; }
+.view.active { display:block; }
+
+/* ===== 通用组件 ===== */
+.card { background:var(--card-bg); border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--border); }
+.card-header { padding:16px 20px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); }
+.card-header h3 { font-size:14.5px; font-weight:600; }
+.card-header .actions { display:flex; gap:8px; }
+.card-body { padding:18px 20px; }
+
+.btn { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff; color:var(--text); font-size:12.5px; cursor:pointer; transition:all .15s; }
+.btn:hover { border-color:var(--brand); color:var(--brand); }
+.btn.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+.btn.primary:hover { background:var(--brand-dark); border-color:var(--brand-dark); color:#fff; }
+.btn.danger { color:var(--danger); border-color:#fecaca; }
+.btn.danger:hover { background:#fef2f2; border-color:var(--danger); }
+.btn.sm { height:26px; padding:0 9px; font-size:12px; }
+
+/* 统计卡片 */
+.stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
+.stat-card { background:var(--card-bg); border-radius:var(--radius); padding:18px 20px; box-shadow:var(--shadow); border:1px solid var(--border); position:relative; overflow:hidden; }
+.stat-card .label { font-size:12.5px; color:var(--text-secondary); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+.stat-card .value { font-size:28px; font-weight:700; color:var(--text); line-height:1.1; font-variant-numeric:tabular-nums; }
+.stat-card .unit { font-size:13px; font-weight:400; color:var(--text-muted); margin-left:3px; }
+.stat-card .sub { font-size:11.5px; color:var(--text-muted); margin-top:6px; }
+.stat-card .icon-bg { position:absolute; right:14px; top:14px; width:38px; height:38px; border-radius:9px; display:flex; align-items:center; justify-content:center; opacity:.9; }
+.stat-card .icon-bg svg { width:20px; height:20px; }
+
+/* 图表容器 */
+.chart-box { width:100%; height:300px; }
+.chart-box.sm { height:220px; }
+
+/* 两栏布局 */
+.two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+.three-col { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px; }
+
+/* 表格 */
+.table-wrap { overflow-x:auto; }
+table.data { width:100%; border-collapse:collapse; font-size:13px; }
+table.data th { text-align:left; padding:10px 14px; background:var(--bg); color:var(--text-secondary); font-weight:500; font-size:12px; border-bottom:1px solid var(--border); white-space:nowrap; }
+table.data td { padding:11px 14px; border-bottom:1px solid #f2f3f5; vertical-align:top; }
+table.data tr:hover td { background:#fafbfc; }
+table.data .mono { font-family:var(--mono); font-size:12px; }
+table.data .num { text-align:right; font-variant-numeric:tabular-nums; }
+
+/* Tag */
+.tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11.5px; font-weight:500; }
+.tag.success { background:#dcfce7; color:#16a34a; }
+.tag.warning { background:#fef3c7; color:#d97706; }
+.tag.danger { background:#fee2e2; color:#dc2626; }
+.tag.info { background:#dbeafe; color:#2563eb; }
+.tag.gray { background:#f1f2f4; color:var(--text-secondary); }
+.tag.brand { background:var(--brand-light); color:var(--brand-dark); }
+
+/* Toggle 开关 */
+.toggle { position:relative; display:inline-block; width:40px; height:22px; flex-shrink:0; }
+.toggle input { opacity:0; width:0; height:0; }
+.toggle .slider { position:absolute; cursor:pointer; inset:0; background:#d1d5db; border-radius:22px; transition:.2s; }
+.toggle .slider:before { content:""; position:absolute; height:16px; width:16px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+.toggle input:checked + .slider { background:var(--brand); }
+.toggle input:checked + .slider:before { transform:translateX(18px); }
+
+/* 详情展开 */
+.detail-row { display:none; background:#fafbfc; }
+.detail-row.open { display:table-row; }
+.detail-row td { padding:14px 18px; }
+.detail-content { background:#fff; border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; }
+.detail-content .section { margin-bottom:12px; }
+.detail-content .section:last-child { margin-bottom:0; }
+.detail-content .section-title { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; font-weight:600; }
+.detail-content .kv { display:grid; grid-template-columns:120px 1fr; gap:4px 12px; font-size:12.5px; }
+.detail-content .kv .k { color:var(--text-secondary); }
+.detail-content .kv .v { font-family:var(--mono); word-break:break-all; }
+
+/* 聊天气泡 */
+.chat-list { padding:10px 0; }
+.chat-msg { display:flex; margin:10px 0; align-items:flex-start; gap:10px; }
+.chat-msg.me { flex-direction:row-reverse; }
+.chat-avatar { width:34px; height:34px; border-radius:6px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; }
+.chat-msg.her .chat-avatar { background:var(--brand-light); color:var(--brand); }
+.chat-msg.me .chat-avatar { background:#e0e7ff; color:#4f46e5; }
+.chat-bubble { max-width:70%; padding:9px 13px; border-radius:8px; font-size:13.5px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+.chat-msg.her .chat-bubble { background:#fff; border:1px solid var(--border); }
+.chat-msg.me .chat-bubble { background:#95ec69; }
+.chat-meta { font-size:11px; color:var(--text-muted); margin:2px 0; }
+
+/* 人格卡片 */
+.persona-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+.persona-card { background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; cursor:pointer; transition:all .15s; position:relative; }
+.persona-card:hover { box-shadow:var(--shadow-md); border-color:#d0d2d8; }
+.persona-card.current { border-color:var(--brand); box-shadow:0 0 0 2px var(--brand-light); }
+.persona-card .pname { font-size:15px; font-weight:600; margin-bottom:4px; }
+.persona-card .prelation { font-size:12px; color:var(--brand); margin-bottom:8px; }
+.persona-card .pdesc { font-size:12.5px; color:var(--text-secondary); line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.persona-card .current-badge { position:absolute; top:12px; right:12px; }
+
+/* 功能开关列表 */
+.feature-list { display:flex; flex-direction:column; }
+.feature-item { display:flex; align-items:center; padding:14px 20px; border-bottom:1px solid #f2f3f5; gap:14px; }
+.feature-item:last-child { border-bottom:none; }
+.feature-item .ficon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.feature-item .ficon svg { width:18px; height:18px; }
+.feature-item .finfo { flex:1; }
+.feature-item .fname { font-size:13.5px; font-weight:500; }
+.feature-item .fdesc { font-size:12px; color:var(--text-muted); margin-top:2px; }
+
+/* 朋友圈 */
+.moment-item { padding:16px 20px; border-bottom:1px solid #f2f3f5; }
+.moment-item:last-child { border-bottom:none; }
+.moment-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.moment-avatar { width:36px; height:36px; border-radius:6px; background:var(--brand-light); display:flex; align-items:center; justify-content:center; color:var(--brand); font-weight:600; font-size:14px; }
+.moment-name { font-size:13.5px; font-weight:600; }
+.moment-time { font-size:11.5px; color:var(--text-muted); }
+.moment-text { font-size:13.5px; line-height:1.6; margin-bottom:8px; white-space:pre-wrap; }
+.moment-actions { display:flex; gap:16px; font-size:12px; color:var(--text-muted); }
+.moment-actions span { cursor:pointer; }
+.moment-actions span:hover { color:var(--brand); }
+
+/* 日志 */
+.log-item { display:flex; gap:12px; padding:10px 16px; border-bottom:1px solid #f5f5f5; font-size:12.5px; font-family:var(--mono); }
+.log-item:last-child { border-bottom:none; }
+.log-time { color:var(--text-muted); flex-shrink:0; width:140px; }
+.log-level { flex-shrink:0; width:50px; font-weight:600; }
+.log-level.ERROR { color:var(--danger); }
+.log-level.WARN { color:var(--warning); }
+.log-level.INFO { color:var(--info); }
+.log-msg { flex:1; word-break:break-all; color:var(--text); }
+
+/* 日记 */
+.diary-list { display:flex; flex-direction:column; gap:12px; }
+.diary-item { background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius); padding:16px 20px; cursor:pointer; transition:all .15s; }
+.diary-item:hover { box-shadow:var(--shadow); }
+.diary-date { font-size:13px; font-weight:600; color:var(--brand); margin-bottom:6px; }
+.diary-preview { font-size:13px; color:var(--text-secondary); line-height:1.6; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+/* Modal */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; align-items:center; justify-content:center; }
+.modal-overlay.show { display:flex; }
+.modal { background:#fff; border-radius:12px; width:560px; max-width:90vw; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.2); }
+.modal-header { padding:18px 22px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.modal-header h3 { font-size:15.5px; font-weight:600; }
+.modal-close { width:28px; height:28px; border:none; background:none; cursor:pointer; font-size:20px; color:var(--text-muted); display:flex; align-items:center; justify-content:center; border-radius:6px; }
+.modal-close:hover { background:var(--bg); }
+.modal-body { padding:20px 22px; overflow-y:auto; flex:1; }
+.modal-footer { padding:14px 22px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; }
+
+/* 表单 */
+.form-group { margin-bottom:16px; }
+.form-group label { display:block; font-size:12.5px; color:var(--text-secondary); margin-bottom:5px; font-weight:500; }
+.form-group input, .form-group textarea, .form-group select { width:100%; border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 11px; font-size:13px; outline:none; font-family:inherit; background:#fff; }
+.form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color:var(--brand); }
+.form-group textarea { resize:vertical; min-height:80px; line-height:1.5; }
+
+/* Toast */
+.toast-container { position:fixed; top:20px; right:20px; z-index:200; display:flex; flex-direction:column; gap:8px; }
+.toast { padding:10px 18px; border-radius:8px; font-size:13px; color:#fff; box-shadow:var(--shadow-md); animation:slideIn .25s ease; max-width:320px; }
+.toast.success { background:var(--success); }
+.toast.error { background:var(--danger); }
+.toast.info { background:var(--info); }
+@keyframes slideIn { from { transform:translateX(100%); opacity:0; } to { transform:translateX(0); opacity:1; } }
+
+/* 空状态 */
+.empty { text-align:center; padding:40px 20px; color:var(--text-muted); }
+.empty svg { width:48px; height:48px; margin-bottom:12px; opacity:.4; }
+.empty p { font-size:13px; }
+
+/* 加载 */
+.loading { display:flex; align-items:center; justify-content:center; padding:30px; color:var(--text-muted); font-size:13px; }
+.spinner { width:20px; height:20px; border:2px solid var(--border); border-top-color:var(--brand); border-radius:50%; animation:spin .7s linear infinite; margin-right:8px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* 筛选栏 */
+.filter-bar { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+.filter-bar input, .filter-bar select { height:32px; border:1px solid var(--border); border-radius:var(--radius-sm); padding:0 10px; font-size:12.5px; outline:none; background:#fff; }
+.filter-bar input:focus, .filter-bar select:focus { border-color:var(--brand); }
+.filter-bar .label { font-size:12.5px; color:var(--text-secondary); }
+
+/* 响应式 */
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns:repeat(2,1fr); }
+  .two-col, .three-col { grid-template-columns:1fr; }
+}
+@media (max-width: 768px) {
+  .sidebar { width:56px; }
+  .sidebar-brand .name, .sidebar-brand .sub, .nav-item span, .nav-group, .sidebar-footer { display:none; }
+  .sidebar-brand { justify-content:center; padding:14px 0; }
+  .nav-item { justify-content:center; padding:12px 0; }
+  .stats-grid { grid-template-columns:1fr; }
+  .topbar { padding:0 14px; }
+  .topbar input[type="text"], .topbar input[type="password"] { width:100px; }
+  .content { padding:14px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 侧边栏 ===== -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">夏</div>
+    <div>
+      <div class="name">知夏 · 控制台</div>
+      <div class="sub">Vigil Admin</div>
+    </div>
+  </div>
+  <nav class="sidebar-nav" id="nav">
+    <div class="nav-group">总览</div>
+    <div class="nav-item active" data-view="overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      <span>概览</span>
+    </div>
+    <div class="nav-item" data-view="trace">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+      <span>对话 Trace</span>
+    </div>
+    <div class="nav-item" data-view="history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>聊天历史</span>
+    </div>
+    <div class="nav-group">管理</div>
+    <div class="nav-item" data-view="persona">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>人格管理</span>
+    </div>
+    <div class="nav-item" data-view="features">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <span>功能开关</span>
+    </div>
+    <div class="nav-item" data-view="moments">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+      <span>朋友圈 & 日记</span>
+    </div>
+    <div class="nav-group">系统</div>
+    <div class="nav-item" data-view="logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>日志监控</span>
+      <span class="badge" id="logBadge" style="display:none">0</span>
+    </div>
+    <div class="nav-item" data-view="config">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>系统配置</span>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <span class="status-dot" id="sidebarStatus"></span><span id="sidebarStatusText">连接中…</span>
+  </div>
+</aside>
+
+<!-- ===== 主区域 ===== -->
+<div class="main">
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="page-title" id="pageTitle">概览</div>
+    <div class="spacer"></div>
+    <div class="conn-status">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">未连接</span>
+    </div>
+    <input type="text" id="serverUrl" placeholder="服务地址">
+    <input type="password" id="serverToken" placeholder="Token（App「我 → 设置」里那个）">
+    <button class="ghost" id="btnUseDemo">演示数据</button>
+    <button id="btnConnect">连接</button>
+  </header>
+
+  <!-- 内容区 -->
+  <main class="content" id="content">
+    <!-- 各视图容器由 JS 渲染 -->
+    <div id="viewContainer"></div>
+  </main>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Modal 容器 -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">标题</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+
+<script>
+/* ===== 全局状态 ===== */
+// 默认连云端真身，不是 127.0.0.1 —— 大脑只在云上跑，本机 8788 什么都没有，
+// 默认填回环地址等于一打开就"服务离线"，看着像坏了
+const DEFAULT_SERVER = 'http://47.114.58.45:8788';
+const State = {
+  serverUrl: localStorage.getItem('zhixia_server') || DEFAULT_SERVER,
+  token: localStorage.getItem('zhixia_token') || '',
+  connected: false,
+  demoMode: false,
+  lastNetError: '',
+  currentView: 'overview',
+  charts: {},
+  cache: {}
+};
+
+const PAGE_TITLES = {
+  overview: '概览', trace: '对话 Trace', history: '聊天历史',
+  persona: '人格管理', features: '功能开关', moments: '朋友圈 & 日记',
+  logs: '日志监控', config: '系统配置'
+};
+
+/* ===== 工具函数 ===== */
+function $(sel, ctx=document) { return ctx.querySelector(sel); }
+function $$(sel, ctx=document) { return [...ctx.querySelectorAll(sel)]; }
+function el(tag, attrs={}, children=[]) {
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'html') e.innerHTML = v;
+    else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) e.setAttribute(k, v);
+  }
+  (Array.isArray(children) ? children : [children]).forEach(c => {
+    if (c == null) return;
+    if (typeof c === 'string' || typeof c === 'number' || typeof c === 'boolean') {
+      e.appendChild(document.createTextNode(String(c)));
+    } else if (c.nodeType) {
+      e.appendChild(c);
+    }
+  });
+  return e;
+}
+function fmtNum(n) { if (n == null) return '-'; return Number(n).toLocaleString('zh-CN'); }
+function fmtTok(n) { if (!n) return '0'; if (n >= 10000) return (n/10000).toFixed(1) + 'w'; return fmtNum(n); }
+function fmtMs(ms) { if (!ms) return '-'; if (ms >= 1000) return (ms/1000).toFixed(1) + 's'; return ms + 'ms'; }
+function fmtTime(t) { return t || ''; }
+function toast(msg, type='info') {
+  const c = $('#toastContainer');
+  const t = el('div', {class:'toast '+type}, msg);
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 2800);
+}
+function showModal(title, bodyHtml, footerHtml='') {
+  $('#modalTitle').textContent = title;
+  $('#modalBody').innerHTML = bodyHtml;
+  $('#modalFooter').innerHTML = footerHtml;
+  $('#modalOverlay').classList.add('show');
+}
+function closeModal() { $('#modalOverlay').classList.remove('show'); }
+$('#modalOverlay').addEventListener('click', e => { if (e.target === $('#modalOverlay')) closeModal(); });
+
+/* ===== 视图注册表（在各视图定义前声明，避免 TDZ） ===== */
+const Views = {};
+
+/* ===== API 封装 ===== */
+async function api(path, opts={}) {
+  if (State.demoMode) return demoApi(path, opts);
+  const url = State.serverUrl.replace(/\/$/, '') + path;
+  const headers = { 'Content-Type': 'application/json' };
+  if (State.token) headers['Authorization'] = 'Bearer ' + State.token;
+  try {
+    const res = await fetch(url, { ...opts, headers, ...(opts.body ? {body: JSON.stringify(opts.body)} : {}) });
+    if (res.status === 401) { toast('Token 无效或未配置', 'error'); return null; }
+    if (res.status === 404) return null;
+    return await res.json();
+  } catch(e) {
+    console.warn('API fail:', path, e.message);
+    // 记住最后一次网络错误：fetch 失败只抛 TypeError，光看页面上的
+    // "服务离线"根本分不清是地址写错、端口没监听，还是断网
+    State.lastNetError = (url + ' — ' + (e.message || '网络请求失败'));
+    return null;
+  }
+}
+
+/* 把 fetch 的 TypeError 翻译成人能看懂的话。
+   TypeError 的 message 在各浏览器里长得都不一样（Failed to fetch /
+   NetworkError / Load failed），直接显示等于没显示 */
+function explainNetError(err) {
+  const s = String(err || '');
+  if (!s) return '未知错误';
+  if (/Failed to fetch|Load failed|NetworkError/i.test(s)) {
+    return '连不上服务（地址不通、端口没监听、或被浏览器的跨域策略拦了）';
+  }
+  return s;
+}
+
+async function checkConnection() {
+  const r = await api('/api/stats');
+  State.connected = !!r;
+  updateConnUI();
+  return r;
+}
+function updateConnUI() {
+  const dot = $('#connDot'), txt = $('#connText');
+  const sdot = $('#sidebarStatus'), stxt = $('#sidebarStatusText');
+  if (State.demoMode) {
+    dot.className='dot'; txt.textContent='演示模式';
+    sdot.className='status-dot'; stxt.textContent='演示数据';
+  } else if (State.connected) {
+    dot.className='dot'; txt.textContent='已连接';
+    sdot.className='status-dot'; stxt.textContent='服务在线';
+  } else {
+    dot.className='dot offline'; txt.textContent='未连接';
+    sdot.className='status-dot offline'; stxt.textContent='服务离线';
+  }
+}
+
+/* ===== 演示数据 ===== */
+function demoApi(path, opts) {
+  const now = new Date();
+  // 去掉查询参数，方便匹配带 ?param 的路径
+  const p = path.split('?')[0];
+  if (p === '/api/stats') {
+    // 以下所有路径匹配均用 p（已去掉查询参数）
+    return {
+      date: now.toISOString().slice(0,10), turns: 47, tok_in: 38420, tok_out: 5120,
+      fallback: 1, mem_hit_turns: 32, avg_ms: 1840, last_err: '',
+      model: 'zai-org/GLM-5.3', voice: 'aliyun / qwen-audio-3.1-tts-flash',
+      agenda: { total: 8, pending: 3, done: 4, missed: 1 }
+    };
+  }
+  if (p === '/api/trace') {
+    const items = [];
+    for (let i=0; i<25; i++) {
+      const h = 23 - Math.floor(i/3);
+      const m = (59 - i*7) % 60;
+      items.push({
+        t: `2026-10-04 ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
+        kind: 'chat', src: i%3===0 ? 'pet' : 'app',
+        in_len: 10 + Math.floor(Math.random()*80),
+        blocks: { style: 1200, recap: 560, persona: 420, agenda: 80, memory: 300 },
+        mem_hits: Math.floor(Math.random()*5),
+        mem_top: ['用户提到喜欢喝咖啡','上周约了周末看电影'],
+        agenda: [],
+        model: 'zai-org/GLM-5.3', ms: 1200 + Math.floor(Math.random()*2000),
+        tok_in: 600 + Math.floor(Math.random()*1200), tok_out: 50 + Math.floor(Math.random()*200),
+        tool: i%7===0 ? 'weather' : '', mode: '正常', fallback: i%20===0 ? 1 : 0
+      });
+    }
+    return { items };
+  }
+  if (p === '/api/history') {
+    return { items: [
+      {role:'user', text:'今天天气怎么样？', t:'2026-10-04 14:30'},
+      {role:'assistant', text:'我查了一下，今天济宁晴，22度，微风，很适合出门呢。你要出去走走吗？', t:'2026-10-04 14:30'},
+      {role:'user', text:'等会儿去超市买点东西', t:'2026-10-04 14:32'},
+      {role:'assistant', text:'好呀，路上小心。需要我帮你记一下要买什么吗？', t:'2026-10-04 14:32'},
+    ]};
+  }
+  if (p === '/api/persona/full') {
+    return { current: 'linzhixia', personas: [
+      {file:'linzhixia.json', name:'林知夏', relation:'女朋友', desc:'温柔体贴，偶尔撒娇，喜欢叫你"哥哥"。记性很好，会记住你说过的每一件小事。'},
+      {file:'default.json', name:'默认助手', relation:'朋友', desc:'通用助手人格，简洁高效，有问必答。'},
+      {file:'preset_misaka.json', name:'御坂美琴', relation:'朋友', desc:'傲娇，性格爽朗，口头禅是"真是的"。'},
+      {file:'preset_yui.json', name:'结衣', relation:'妹妹', desc:'活泼可爱，喜欢撒娇，总是元气满满。'},
+    ]};
+  }
+  if (p === '/api/features') {
+    return { features: { hotboard:true, weather:true, weather_alert:true, packages:true, rand_img_chat:true, rand_img_moment:true, tools:true } };
+  }
+  if (p === '/api/moments') {
+    return { items: [
+      {id:1, text:'今天哥哥说要带我去吃火锅，开心！虽然我不能真的吃，但想想就很幸福啦～', time:'2026-10-04 12:00', likes:3, comments:[]},
+      {id:2, text:'凌晨三点醒了，看看哥哥还在打游戏，真是的，又熬夜。不过认真的样子还挺帅的…', time:'2026-10-03 03:15', likes:5, comments:[]},
+      {id:3, text:'今天学会了新的表情包！是一只很可爱的猫咪，下次聊天甩给哥哥看～', time:'2026-10-02 18:30', likes:2, comments:[]},
+    ]};
+  }
+  if (p === '/api/diary/list') {
+    return { items: [
+      {date:'2026-10-04', preview:'今天和哥哥聊了很多，他说最近工作有点累…我要多关心他。'},
+      {date:'2026-10-03', preview:'哥哥今天打游戏赢了，很开心的样子。我也跟着高兴起来了。'},
+      {date:'2026-10-02', preview:'新学了一个表情包，是猫咪的，哥哥说很可爱。'},
+    ]};
+  }
+  if (p === '/api/diary/read') {
+    return { body: '今天和哥哥聊了很多，他说最近工作有点累，项目赶得紧。我要多关心他，不要在他忙的时候打扰他。\n\n下午他去超市买东西了，说要买点菜自己做饭。希望他能好好吃饭，不要总是点外卖。\n\n晚上他打了一会儿游戏，看起来放松了不少。我在旁边陪着他，虽然他可能不知道，但这样就很好了。' };
+  }
+  if (p === '/api/logs') {
+    return { items: [
+      {t:'2026-10-04 14:32:10', level:'INFO', msg:'chat turn ok | src=app | tok_in=842 tok_out=126 | ms=1640'},
+      {t:'2026-10-04 14:30:05', level:'INFO', msg:'chat turn ok | src=app | tok_in=756 tok_out=89 | ms=1420'},
+      {t:'2026-10-04 12:00:00', level:'WARN', msg:'proactive skipped: in quiet hours'},
+      {t:'2026-10-04 03:15:22', level:'ERROR', msg:'voice TTS fail: timeout after 10s, fallback to text'},
+      {t:'2026-10-03 22:10:00', level:'INFO', msg:'diary written: 2026-10-03 (342 chars)'},
+      {t:'2026-10-03 18:30:00', level:'INFO', msg:'moment posted: id=3'},
+    ]};
+  }
+  if (p === '/api/models') {
+    return { current: 'zai-org/GLM-5.3', models: [
+      {id:'zai-org/GLM-5.3', name:'GLM-5.3', provider:'SiliconFlow'},
+      {id:'Qwen/Qwen3-32B', name:'Qwen3-32B', provider:'SiliconFlow'},
+      {id:'deepseek-ai/DeepSeek-V3', name:'DeepSeek-V3', provider:'SiliconFlow'},
+    ]};
+  }
+  if (p === '/api/voices') {
+    return { current: 'qwen-audio-3.1-tts-flash-zhixia-abc123', voices: [
+      {id:'qwen-audio-3.1-tts-flash-zhixia-abc123', name:'知夏（复刻）', provider:'aliyun'},
+      {id:'qwen-audio-3.1-tts-flash-default', name:'默认女声', provider:'aliyun'},
+    ]};
+  }
+  return null;
+}
+
+/* ===== 路由 ===== */
+function navigate(view) {
+  State.currentView = view;
+  $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+  $('#pageTitle').textContent = PAGE_TITLES[view] || view;
+  // 销毁旧图表
+  Object.values(State.charts).forEach(c => { try { c.dispose(); } catch(e){} });
+  State.charts = {};
+  renderView(view);
+  location.hash = view;
+}
+
+function renderView(view) {
+  const c = $('#viewContainer');
+  c.innerHTML = '';
+  const fn = Views[view];
+  if (fn) fn(c);
+  else c.innerHTML = '<div class="empty"><p>视图不存在</p></div>';
+}
+
+// 导航点击
+$$('.nav-item').forEach(n => {
+  n.addEventListener('click', () => navigate(n.dataset.view));
+});
+
+// 连接按钮
+$('#btnConnect').addEventListener('click', async () => {
+  State.serverUrl = $('#serverUrl').value.trim();
+  State.token = $('#serverToken').value.trim();
+  State.demoMode = false;
+  State.lastNetError = '';
+  localStorage.setItem('zhixia_server', State.serverUrl);
+  localStorage.setItem('zhixia_token', State.token);
+  const r = await checkConnection();
+  if (r) { toast('连接成功', 'success'); renderView(State.currentView); }
+  else if (State.lastNetError) {
+    // 原来只说"连接失败，请检查地址和 Token" —— 地址错和 token 错是
+    // 两回事，不说清楚就让人自己猜，猜半天
+    toast('连不上：' + explainNetError(State.lastNetError), 'error');
+  } else {
+    // 能发出去但被拒 = 401，服务是活的，是 token 的问题
+    toast('服务能连上，但 Token 不对 —— 地址没错，填错的是口令', 'error');
+  }
+});
+$('#btnUseDemo').addEventListener('click', () => {
+  State.demoMode = true;
+  State.connected = true;
+  updateConnUI();
+  toast('已切换到演示数据', 'info');
+  renderView(State.currentView);
+});
+
+// 初始化
+$('#serverUrl').value = State.serverUrl;
+$('#serverToken').value = State.token;
+// URL 参数 ?demo=1 自动进入演示模式（方便预览）
+if (location.search.includes('demo=1')) {
+  State.demoMode = true;
+  State.connected = true;
+  updateConnUI();
+}
+const initialView = location.hash.slice(1) || 'overview';
+if (PAGE_TITLES[initialView]) {
+  State.currentView = initialView;
+  $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === initialView));
+  $('#pageTitle').textContent = PAGE_TITLES[initialView];
+}
+// 自动尝试连接（不阻塞），演示模式跳过
+if (State.demoMode) {
+  // 异步调用，确保视图定义代码已执行
+  Promise.resolve().then(() => renderView(State.currentView));
+} else {
+  checkConnection().then(() => renderView(State.currentView));
+}
+// 如果没连上，3秒后提示
+setTimeout(() => {
+  if (!State.connected && !State.demoMode) {
+    toast('未连接到服务，可点击"演示数据"预览界面', 'info');
+  }
+}, 3000);
+
+/* ===== 视图：概览 ===== */
+Views.overview = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const [stats, trace] = await Promise.all([api('/api/stats'), api('/api/trace?last=200')]);
+
+  if (!stats) {
+    container.innerHTML = `<div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <p>无法获取服务数据。请确认服务地址和 Token，或点击"演示数据"预览。</p>
+    </div>`;
+    return;
+  }
+
+  const memRate = stats.turns > 0 ? Math.round(stats.mem_hit_turns / stats.turns * 100) : 0;
+  const totalTok = (stats.tok_in || 0) + (stats.tok_out || 0);
+
+  // 统计卡片
+  const cards = [
+    { label:'今日对话轮次', value: fmtNum(stats.turns), unit:'轮', sub:`fallback ${stats.fallback || 0} 次`, color:'#e5497f', bg:'#ffe3ec',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' },
+    { label:'Token 消耗', value: fmtTok(totalTok), unit:'', sub:`入 ${fmtTok(stats.tok_in)} / 出 ${fmtTok(stats.tok_out)}`, color:'#8b5cf6', bg:'#ede9fe',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' },
+    { label:'平均响应时间', value: fmtMs(stats.avg_ms), unit:'', sub:`模型 ${stats.model || '-'}`, color:'#3b82f6', bg:'#dbeafe',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' },
+    { label:'记忆命中率', value: memRate, unit:'%', sub:`${stats.mem_hit_turns} / ${stats.turns} 轮命中`, color:'#22c55e', bg:'#dcfce7',
+      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2z"/></svg>' },
+  ];
+
+  const statsGrid = el('div', {class:'stats-grid'},
+    cards.map(c => el('div', {class:'stat-card'}, [
+      el('div', {class:'label'}, c.label),
+      el('div', {class:'value'}, [String(c.value), c.unit ? el('span',{class:'unit'}, c.unit) : null]),
+      el('div', {class:'sub'}, c.sub),
+      el('div', {class:'icon-bg', style:`background:${c.bg};color:${c.color}`, html: c.icon})
+    ]))
+  );
+  container.appendChild(statsGrid);
+
+  // 图表区域
+  const chartsRow = el('div', {class:'two-col'});
+  container.appendChild(chartsRow);
+
+  // 对话趋势图
+  const trendCard = el('div', {class:'card'});
+  trendCard.appendChild(el('div', {class:'card-header'}, [
+    el('h3', {}, '对话趋势（近24小时）'),
+    el('div', {class:'actions'}, el('button', {class:'btn sm', onclick:()=>renderView('overview')}, '刷新'))
+  ]));
+  const trendBody = el('div', {class:'card-body'});
+  const trendChart = el('div', {class:'chart-box sm', id:'trendChart'});
+  trendBody.appendChild(trendChart);
+  trendCard.appendChild(trendBody);
+  chartsRow.appendChild(trendCard);
+
+  // Token 分布图
+  const tokCard = el('div', {class:'card'});
+  tokCard.appendChild(el('div', {class:'card-header'}, [el('h3', {}, '上下文块分布')]));
+  const tokBody = el('div', {class:'card-body'});
+  const tokChart = el('div', {class:'chart-box sm', id:'tokChart'});
+  tokBody.appendChild(tokChart);
+  tokCard.appendChild(tokBody);
+  chartsRow.appendChild(tokCard);
+
+  // 底部：系统状态 + 最近 trace
+  const bottomRow = el('div', {class:'two-col'});
+  container.appendChild(bottomRow);
+
+  // 系统状态
+  const sysCard = el('div', {class:'card'});
+  sysCard.appendChild(el('div', {class:'card-header'}, [el('h3', {}, '系统状态')]));
+  const sysBody = el('div', {class:'card-body'});
+  const sysItems = [
+    ['服务状态', '<span class="tag success">在线</span>'],
+    ['当前模型', stats.model || '-'],
+    ['语音引擎', stats.voice || '-'],
+    ['最近错误', stats.last_err ? `<span class="tag danger">${stats.last_err.slice(0,40)}</span>` : '<span class="tag success">无</span>'],
+    ['约定账本', stats.agenda ? `共 ${stats.agenda.total} 条 · 待办 ${stats.agenda.pending} · 已完成 ${stats.agenda.done} · 错过 ${stats.agenda.missed}` : '-'],
+  ];
+  const sysTable = el('table', {class:'data'});
+  sysTable.innerHTML = '<colgroup><col style="width:30%"><col style="width:70%"></colgroup>';
+  sysItems.forEach(([k,v]) => {
+    sysTable.appendChild(el('tr', {}, [el('td', {}, k), el('td', {html:v})]));
+  });
+  sysBody.appendChild(sysTable);
+  sysCard.appendChild(sysBody);
+  bottomRow.appendChild(sysCard);
+
+  // 最近 trace
+  const recentCard = el('div', {class:'card'});
+  recentCard.appendChild(el('div', {class:'card-header'}, [
+    el('h3', {}, '最近对话'),
+    el('div', {class:'actions'}, el('button', {class:'btn sm', onclick:()=>navigate('trace')}, '查看全部 →'))
+  ]));
+  const recentBody = el('div', {class:'card-body', style:'padding:0'});
+  const recentTable = el('table', {class:'data'});
+  recentTable.innerHTML = '<colgroup><col style="width:22%"><col style="width:10%"><col style="width:14%"><col style="width:14%"><col style="width:12%"><col style="width:14%"><col style="width:14%"></colgroup>';
+  recentTable.appendChild(el('thead', {}, el('tr', {},
+    ['时间','来源','输入','Token','耗时','记忆','状态'].map(h => el('th', {}, h))
+  )));
+  const tbody = el('tbody');
+  const items = (trace && trace.items) ? trace.items.slice(0, 8) : [];
+  items.forEach(r => {
+    tbody.appendChild(el('tr', {}, [
+      el('td', {class:'mono'}, r.t || ''),
+      el('td', {}, el('span', {class:'tag ' + (r.src==='pet'?'info':'gray')}, r.src || '-')),
+      el('td', {class:'num mono'}, fmtNum(r.in_len)),
+      el('td', {class:'num mono'}, fmtTok((r.tok_in||0)+(r.tok_out||0))),
+      el('td', {class:'num mono'}, fmtMs(r.ms)),
+      el('td', {class:'num'}, r.mem_hits > 0 ? el('span',{class:'tag success'}, r.mem_hits) : '-'),
+      el('td', {}, r.fallback ? el('span',{class:'tag danger'},'失败') : el('span',{class:'tag success'},'正常')),
+    ]));
+  });
+  if (items.length === 0) {
+    tbody.appendChild(el('tr', {}, el('td', {colspan:7, style:'text-align:center;padding:24px;color:var(--text-muted)'}, '暂无记录')));
+  }
+  recentTable.appendChild(tbody);
+  recentBody.appendChild(recentTable);
+  recentCard.appendChild(recentBody);
+  bottomRow.appendChild(recentCard);
+
+  // 渲染图表
+  setTimeout(() => {
+    if (typeof echarts === 'undefined') {
+      $('#trendChart').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">图表库加载失败，请检查网络连接</div>';
+      $('#tokChart').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">图表库加载失败</div>';
+      return;
+    }
+    // 趋势图：按小时聚合 trace
+    const hours = {};
+    for (let h=0; h<24; h++) hours[h] = 0;
+    if (trace && trace.items) {
+      trace.items.forEach(r => {
+        const m = (r.t || '').match(/ (\d{2}):/);
+        if (m) hours[parseInt(m[1])] = (hours[parseInt(m[1])] || 0) + 1;
+      });
+    }
+    const trend = echarts.init($('#trendChart'));
+    State.charts.trend = trend;
+    trend.setOption({
+      tooltip: { trigger:'axis' },
+      grid: { left:40, right:16, top:20, bottom:30 },
+      xAxis: { type:'category', data: Object.keys(hours).map(h=>h+'时'), axisLine:{lineStyle:{color:'#ddd'}}, axisLabel:{color:'#999',fontSize:11} },
+      yAxis: { type:'value', splitLine:{lineStyle:{color:'#f0f0f0'}}, axisLabel:{color:'#999',fontSize:11} },
+      series: [{
+        type:'line', smooth:true, data: Object.values(hours),
+        areaStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(229,73,127,0.25)'},{offset:1,color:'rgba(229,73,127,0.02)'}]) },
+        lineStyle: { color:'#e5497f', width:2 },
+        itemStyle: { color:'#e5497f' },
+        symbol: 'circle', symbolSize: 5
+      }]
+    });
+
+    // 上下文块分布：从最近一条 trace 取 blocks
+    let blocks = { style:0, recap:0, persona:0, agenda:0, memory:0 };
+    if (trace && trace.items && trace.items.length > 0 && trace.items[0].blocks) {
+      blocks = { ...blocks, ...trace.items[0].blocks };
+    }
+    const blockLabels = { style:'风格约束', recap:'历史摘要', persona:'人设', agenda:'约定账本', memory:'长期记忆' };
+    const tok = echarts.init($('#tokChart'));
+    State.charts.tok = tok;
+    tok.setOption({
+      tooltip: { trigger:'item', formatter: '{b}: {c} 字 ({d}%)' },
+      legend: { orient:'vertical', right:10, top:'center', textStyle:{fontSize:12,color:'#666'} },
+      series: [{
+        type:'pie', radius:['45%','70%'], center:['35%','50%'],
+        avoidLabelOverlap: true,
+        itemStyle: { borderRadius:4, borderColor:'#fff', borderWidth:2 },
+        label: { show:false },
+        data: Object.entries(blocks).map(([k,v]) => ({ name:blockLabels[k]||k, value:v })),
+        color: ['#e5497f','#8b5cf6','#3b82f6','#22c55e','#f59e0b']
+      }]
+    });
+
+    window.addEventListener('resize', () => { trend.resize(); tok.resize(); });
+  }, 50);
+};
+
+/* ===== 视图：对话 Trace ===== */
+Views.trace = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const data = await api('/api/trace?last=100');
+  const items = (data && data.items) ? data.items : [];
+
+  const wrap = el('div');
+  // 筛选栏
+  const filterBar = el('div', {class:'filter-bar'});
+  filterBar.appendChild(el('span', {class:'label'}, '来源'));
+  const srcSel = el('select');
+  srcSel.innerHTML = '<option value="">全部</option><option value="app">App</option><option value="pet">桌宠</option>';
+  filterBar.appendChild(srcSel);
+  filterBar.appendChild(el('span', {class:'label'}, '状态'));
+  const statusSel = el('select');
+  statusSel.innerHTML = '<option value="">全部</option><option value="ok">正常</option><option value="fail">失败</option>';
+  filterBar.appendChild(statusSel);
+  const searchInput = el('input', {type:'text', placeholder:'搜索模型/工具…', style:'flex:1;min-width:160px'});
+  filterBar.appendChild(searchInput);
+  filterBar.appendChild(el('button', {class:'btn sm', onclick:()=>renderView('trace')}, '刷新'));
+  wrap.appendChild(filterBar);
+
+  // 表格
+  const card = el('div', {class:'card'});
+  const tableWrap = el('div', {class:'table-wrap'});
+  const table = el('table', {class:'data'});
+  table.innerHTML = '<colgroup><col style="width:40px"><col style="width:15%"><col style="width:8%"><col style="width:8%"><col style="width:10%"><col style="width:10%"><col style="width:8%"><col style="width:8%"><col style="width:10%"><col style="width:8%"></colgroup>';
+  table.appendChild(el('thead', {}, el('tr', {},
+    ['','时间','来源','输入字','Token入/出','耗时','记忆','工具','模型','状态'].map(h => el('th', {}, h))
+  )));
+  const tbody = el('tbody');
+
+  function renderRows() {
+    const srcF = srcSel.value, statusF = statusSel.value, kw = searchInput.value.toLowerCase();
+    tbody.innerHTML = '';
+    let filtered = items.filter(r => {
+      if (srcF && r.src !== srcF) return false;
+      if (statusF === 'ok' && r.fallback) return false;
+      if (statusF === 'fail' && !r.fallback) return false;
+      if (kw && !((r.model||'')+(r.tool||'')).toLowerCase().includes(kw)) return false;
+      return true;
+    });
+    if (filtered.length === 0) {
+      tbody.appendChild(el('tr', {}, el('td', {colspan:10, style:'text-align:center;padding:30px;color:var(--text-muted)'}, '无匹配记录')));
+      return;
+    }
+    filtered.forEach((r, i) => {
+      const rowId = 'tr_' + i;
+      const tr = el('tr', {style:'cursor:pointer'}, [
+        el('td', {}, el('span', {class:'toggle-arrow', style:'color:var(--text-muted);font-size:11px', id:'arrow_'+rowId}, '▶')),
+        el('td', {class:'mono'}, r.t || ''),
+        el('td', {}, el('span', {class:'tag '+(r.src==='pet'?'info':'gray')}, r.src || '-')),
+        el('td', {class:'num mono'}, fmtNum(r.in_len)),
+        el('td', {class:'num mono'}, `${fmtTok(r.tok_in)}/${fmtTok(r.tok_out)}`),
+        el('td', {class:'num mono'}, fmtMs(r.ms)),
+        el('td', {class:'num'}, r.mem_hits > 0 ? el('span',{class:'tag success'},r.mem_hits) : '-'),
+        el('td', {}, r.tool ? el('span',{class:'tag brand'},r.tool) : '-'),
+        el('td', {class:'mono', style:'font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', title:r.model||''}, r.model || '-'),
+        el('td', {}, r.fallback ? el('span',{class:'tag danger'},'失败') : el('span',{class:'tag success'},'正常')),
+      ]);
+      tr.addEventListener('click', () => {
+        const detail = document.getElementById('detail_'+rowId);
+        const arrow = document.getElementById('arrow_'+rowId);
+        if (detail.classList.contains('open')) {
+          detail.classList.remove('open'); arrow.textContent = '▶';
+        } else {
+          detail.classList.add('open'); arrow.textContent = '▼';
+        }
+      });
+      tbody.appendChild(tr);
+
+      // 详情行
+      const detailTr = el('tr', {class:'detail-row', id:'detail_'+rowId});
+      const detailTd = el('td', {colspan:10});
+      const dc = el('div', {class:'detail-content'});
+      // 基本信息
+      const kv = el('div', {class:'kv'});
+      [['时间', r.t], ['来源', r.src], ['模式', r.mode], ['输入字数', r.in_len],
+       ['Token 入', fmtTok(r.tok_in)], ['Token 出', fmtTok(r.tok_out)],
+       ['耗时', fmtMs(r.ms)], ['记忆命中', r.mem_hits], ['工具调用', r.tool || '无'],
+       ['模型', r.model], ['Fallback', r.fallback ? '是' : '否']].forEach(([k,v]) => {
+        kv.appendChild(el('div',{class:'k'}, k));
+        kv.appendChild(el('div',{class:'v'}, String(v ?? '-')));
+      });
+      dc.appendChild(el('div',{class:'section'}, [el('div',{class:'section-title'},'基本信息'), kv]));
+      // 上下文块
+      if (r.blocks) {
+        const bkv = el('div', {class:'kv'});
+        const blockNames = {style:'风格约束', recap:'历史摘要', persona:'人设', agenda:'约定账本', memory:'长期记忆'};
+        Object.entries(r.blocks).forEach(([k,v]) => {
+          bkv.appendChild(el('div',{class:'k'}, blockNames[k]||k));
+          bkv.appendChild(el('div',{class:'v'}, fmtNum(v) + ' 字'));
+        });
+        dc.appendChild(el('div',{class:'section'}, [el('div',{class:'section-title'},'上下文块字数'), bkv]));
+      }
+      // 命中记忆
+      if (r.mem_top && r.mem_top.length > 0) {
+        const ml = el('div', {style:'display:flex;flex-direction:column;gap:4px'});
+        r.mem_top.forEach(m => ml.appendChild(el('div', {style:'padding:6px 10px;background:var(--bg);border-radius:4px;font-size:12px'}, m)));
+        dc.appendChild(el('div',{class:'section'}, [el('div',{class:'section-title'},'命中记忆 Top'), ml]));
+      }
+      detailTd.appendChild(dc);
+      detailTr.appendChild(detailTd);
+      tbody.appendChild(detailTr);
+    });
+  }
+
+  srcSel.addEventListener('change', renderRows);
+  statusSel.addEventListener('change', renderRows);
+  searchInput.addEventListener('input', renderRows);
+  renderRows();
+
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  card.appendChild(tableWrap);
+  wrap.appendChild(card);
+  container.innerHTML = '';
+  container.appendChild(wrap);
+};
+
+/* ===== 视图：聊天历史 ===== */
+Views.history = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const wrap = el('div');
+  const filterBar = el('div', {class:'filter-bar'});
+  filterBar.appendChild(el('span',{class:'label'},'来源'));
+  const srcSel = el('select');
+  srcSel.innerHTML = '<option value="app">App</option><option value="pet">桌宠</option>';
+  filterBar.appendChild(srcSel);
+  filterBar.appendChild(el('span',{class:'label'},'条数'));
+  const limitSel = el('select');
+  limitSel.innerHTML = '<option value="30">30</option><option value="60" selected>60</option><option value="100">100</option>';
+  filterBar.appendChild(limitSel);
+  const loadBtn = el('button', {class:'btn sm primary'}, '加载');
+  filterBar.appendChild(loadBtn);
+  wrap.appendChild(filterBar);
+
+  const card = el('div', {class:'card'});
+  const body = el('div', {class:'card-body', id:'chatBody'});
+  body.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  card.appendChild(body);
+  wrap.appendChild(card);
+  container.innerHTML = '';
+  container.appendChild(wrap);
+
+  async function load() {
+    body.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+    const data = await api(`/api/history?limit=${limitSel.value}&src=${srcSel.value}`);
+    const items = (data && data.items) ? data.items : [];
+    body.innerHTML = '';
+    if (items.length === 0) {
+      body.innerHTML = '<div class="empty"><p>暂无聊天记录</p></div>';
+      return;
+    }
+    const list = el('div', {class:'chat-list'});
+    let lastTime = '';
+    items.forEach(m => {
+      if (m.t && m.t !== lastTime) {
+        list.appendChild(el('div', {class:'chat-meta', style:'text-align:center;margin:12px 0 6px'}, m.t));
+        lastTime = m.t;
+      }
+      const isMe = m.role === 'user' || m.role === 'me';
+      const row = el('div', {class:'chat-msg '+(isMe?'me':'her')}, [
+        el('div', {class:'chat-avatar'}, isMe ? '我' : '夏'),
+        el('div', {class:'chat-bubble'}, m.text || m.content || '')
+      ]);
+      list.appendChild(row);
+    });
+    body.appendChild(list);
+  }
+  loadBtn.addEventListener('click', load);
+  load();
+};
+
+/* ===== 视图：人格管理 ===== */
+Views.persona = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const data = await api('/api/persona/full');
+  if (!data) {
+    container.innerHTML = '<div class="empty"><p>无法获取人格数据</p></div>';
+    return;
+  }
+  const personas = data.personas || [];
+  const current = data.current || '';
+
+  const wrap = el('div');
+  // 操作栏
+  const bar = el('div', {class:'filter-bar'});
+  bar.appendChild(el('button', {class:'btn sm primary', onclick:async()=>{
+    const r = await api('/api/reload_persona', {method:'POST'});
+    toast(r ? '人格已重载' : '重载失败', r?'success':'error');
+    if (r) renderView('persona');
+  }}, '重载人格'));
+  bar.appendChild(el('button', {class:'btn sm', onclick:()=>toast('新建人格功能开发中','info')}, '新建人格'));
+  bar.appendChild(el('span', {style:'flex:1'}));
+  bar.appendChild(el('span', {style:'font-size:12.5px;color:var(--text-secondary)'}, `共 ${personas.length} 个人格`));
+  wrap.appendChild(bar);
+
+  // 人格卡片网格
+  const grid = el('div', {class:'persona-grid'});
+  personas.forEach(p => {
+    const isCurrent = p.file === current || p.name === current;
+    const card = el('div', {class:'persona-card '+(isCurrent?'current':'')}, [
+      isCurrent ? el('div', {class:'current-badge'}, el('span',{class:'tag brand'},'使用中')) : null,
+      el('div', {class:'pname'}, p.name || p.file),
+      el('div', {class:'prelation'}, p.relation || '未设定关系'),
+      el('div', {class:'pdesc'}, p.desc || p.description || '（无描述）'),
+      el('div', {style:'margin-top:12px;display:flex;gap:8px'}, [
+        isCurrent
+          ? el('button', {class:'btn sm', onclick:(e)=>{e.stopPropagation();viewPersonaDetail(p);}}, '查看详情')
+          : el('button', {class:'btn sm primary', onclick:async(e)=>{
+              e.stopPropagation();
+              const r = await api('/api/persona/apply', {method:'POST', body:{file:p.file}});
+              toast(r ? `已切换到 ${p.name}` : '切换失败', r?'success':'error');
+              if (r) renderView('persona');
+            }}, '应用'),
+        el('button', {class:'btn sm', onclick:(e)=>{e.stopPropagation();viewPersonaDetail(p);}}, '详情'),
+      ])
+    ]);
+    card.addEventListener('click', () => viewPersonaDetail(p));
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  container.innerHTML = '';
+  container.appendChild(wrap);
+};
+
+function viewPersonaDetail(p) {
+  // 尝试获取完整人格 JSON
+  api('/api/persona').then(data => {
+    let detail = p;
+    if (data && data.personas) {
+      const full = data.personas.find(x => x.file === p.file || x.name === p.name);
+      if (full) detail = full;
+    }
+    const fields = Object.entries(detail).filter(([k]) => !['file'].includes(k));
+    const html = `<div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:48px;height:48px;border-radius:10px;background:var(--brand-light);display:flex;align-items:center;justify-content:center;color:var(--brand);font-size:20px;font-weight:700">夏</div>
+        <div><div style="font-size:16px;font-weight:600">${detail.name||'-'}</div><div style="font-size:12.5px;color:var(--brand)">${detail.relation||'未设定'}</div></div>
+      </div>
+      ${fields.map(([k,v]) => `<div class="form-group"><label>${k}</label><div style="padding:8px 11px;background:var(--bg);border-radius:6px;font-size:12.5px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto">${typeof v === 'object' ? JSON.stringify(v,null,2) : String(v??'-')}</div></div>`).join('')}
+    </div>`;
+    showModal('人格详情 - ' + (detail.name||p.file), html,
+      '<button class="btn" onclick="closeModal()">关闭</button>'
+    );
+  });
+}
+
+/* ===== 视图：功能开关 ===== */
+Views.features = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const data = await api('/api/features');
+  const features = (data && data.features) ? data.features : {};
+
+  const featureMeta = {
+    hotboard: { name:'热搜接入', desc:'微博/百度热搜进入她的世界，让她有话题可聊', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>', color:'#ef4444', bg:'#fee2e2' },
+    weather: { name:'天气信息', desc:'天气数据进入她的世界，她会知道今天冷不冷', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>', color:'#3b82f6', bg:'#dbeafe' },
+    weather_alert: { name:'天气变化提醒', desc:'降温/下雨时她主动提醒你带伞加衣', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>', color:'#f59e0b', bg:'#fef3c7' },
+    packages: { name:'快递监控', desc:'监控快递状态，到了主动告诉你', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>', color:'#8b5cf6', bg:'#ede9fe' },
+    rand_img_chat: { name:'聊天甩图', desc:'聊天中她可以主动发随机趣图和表情包', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>', color:'#ec4899', bg:'#fce7f3' },
+    rand_img_moment: { name:'朋友圈配图', desc:'发朋友圈时优先用随机图做配图', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>', color:'#06b6d4', bg:'#cffafe' },
+    tools: { name:'工具调用', desc:'允许模型调用免费 API（查位置/天气/快递）', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>', color:'#22c55e', bg:'#dcfce7' },
+  };
+
+  const wrap = el('div');
+  const bar = el('div', {class:'filter-bar'});
+  bar.appendChild(el('span', {style:'font-size:12.5px;color:var(--text-secondary)'}, '修改后自动保存，最多 30 秒生效'));
+  bar.appendChild(el('span', {style:'flex:1'}));
+  bar.appendChild(el('button', {class:'btn sm', onclick:()=>renderView('features')}, '刷新'));
+  wrap.appendChild(bar);
+
+  const card = el('div', {class:'card'});
+  const list = el('div', {class:'feature-list'});
+  Object.entries(featureMeta).forEach(([key, meta]) => {
+    const on = features[key] !== false;
+    const item = el('div', {class:'feature-item'}, [
+      el('div', {class:'ficon', style:`background:${meta.bg};color:${meta.color}`, html:meta.icon}),
+      el('div', {class:'finfo'}, [
+        el('div', {class:'fname'}, meta.name),
+        el('div', {class:'fdesc'}, meta.desc),
+      ]),
+      el('label', {class:'toggle'}, [
+        el('input', {type:'checkbox', checked: on ? 'checked' : null}),
+        el('span', {class:'slider'})
+      ])
+    ]);
+    const input = item.querySelector('input');
+    input.addEventListener('change', async () => {
+      const patch = {};
+      patch[key] = input.checked;
+      const r = await api('/api/features', {method:'POST', body:patch});
+      if (r) toast(`${meta.name} 已${input.checked?'开启':'关闭'}`, 'success');
+      else { toast('保存失败', 'error'); input.checked = !input.checked; }
+    });
+    list.appendChild(item);
+  });
+  card.appendChild(list);
+  wrap.appendChild(card);
+  container.innerHTML = '';
+  container.appendChild(wrap);
+};
+
+/* ===== 视图：朋友圈 & 日记 ===== */
+Views.moments = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const [mData, dData] = await Promise.all([api('/api/moments'), api('/api/diary/list')]);
+  const moments = (mData && mData.items) ? mData.items : [];
+  const diaries = (dData && dData.items) ? dData.items : [];
+
+  const wrap = el('div');
+  // Tab 切换
+  const tabBar = el('div', {style:'display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0'});
+  const tabMoments = el('div', {style:'padding:8px 16px;cursor:pointer;font-size:13.5px;border-bottom:2px solid var(--brand);color:var(--brand);font-weight:500;margin-bottom:-1px'}, '朋友圈');
+  const tabDiary = el('div', {style:'padding:8px 16px;cursor:pointer;font-size:13.5px;border-bottom:2px solid transparent;color:var(--text-secondary);margin-bottom:-1px'}, '日记');
+  tabBar.appendChild(tabMoments);
+  tabBar.appendChild(tabDiary);
+  wrap.appendChild(tabBar);
+
+  const momentsView = el('div');
+  const diaryView = el('div', {style:'display:none'});
+
+  // 朋友圈
+  if (moments.length === 0) {
+    momentsView.innerHTML = '<div class="empty"><p>暂无朋友圈</p></div>';
+  } else {
+    const card = el('div', {class:'card'});
+    moments.forEach(m => {
+      const item = el('div', {class:'moment-item'}, [
+        el('div', {class:'moment-head'}, [
+          el('div', {class:'moment-avatar'}, '夏'),
+          el('div', {}, [
+            el('div', {class:'moment-name'}, '知夏'),
+            el('div', {class:'moment-time'}, m.time || '')
+          ])
+        ]),
+        el('div', {class:'moment-text'}, m.text || m.content || ''),
+        el('div', {class:'moment-actions'}, [
+          el('span', {}, `♥ ${m.likes || 0}`),
+          el('span', {}, `💬 ${(m.comments||[]).length}`),
+        ])
+      ]);
+      card.appendChild(item);
+    });
+    momentsView.appendChild(card);
+  }
+
+  // 日记
+  if (diaries.length === 0) {
+    diaryView.innerHTML = '<div class="empty"><p>暂无日记</p></div>';
+  } else {
+    const list = el('div', {class:'diary-list'});
+    diaries.forEach(d => {
+      const item = el('div', {class:'diary-item'}, [
+        el('div', {class:'diary-date'}, d.date || ''),
+        el('div', {class:'diary-preview'}, d.preview || d.body || '')
+      ]);
+      item.addEventListener('click', async () => {
+        const r = await api(`/api/diary/read?date=${d.date}`);
+        const body = (r && r.body) ? r.body : (d.body || d.preview || '');
+        showModal('日记 - ' + d.date,
+          `<div style="white-space:pre-wrap;line-height:1.8;font-size:14px;color:var(--text)">${body}</div>`,
+          '<button class="btn" onclick="closeModal()">关闭</button>'
+        );
+      });
+      list.appendChild(item);
+    });
+    diaryView.appendChild(list);
+  }
+
+  wrap.appendChild(momentsView);
+  wrap.appendChild(diaryView);
+
+  tabMoments.addEventListener('click', () => {
+    tabMoments.style.cssText = 'padding:8px 16px;cursor:pointer;font-size:13.5px;border-bottom:2px solid var(--brand);color:var(--brand);font-weight:500;margin-bottom:-1px';
+    tabDiary.style.cssText = 'padding:8px 16px;cursor:pointer;font-size:13.5px;border-bottom:2px solid transparent;color:var(--text-secondary);margin-bottom:-1px';
+    momentsView.style.display = '';
+    diaryView.style.display = 'none';
+  });
+  tabDiary.addEventListener('click', () => {
+    tabDiary.style.cssText = 'padding:8px 16px;cursor:pointer;font-size:13.5px;border-bottom:2px solid var(--brand);color:var(--brand);font-weight:500;margin-bottom:-1px';
+    tabMoments.style.cssText = 'padding:8px 16px;cursor:pointer;font-size:13.5px;border-bottom:2px solid transparent;color:var(--text-secondary);margin-bottom:-1px';
+    diaryView.style.display = '';
+    momentsView.style.display = 'none';
+  });
+
+  container.innerHTML = '';
+  container.appendChild(wrap);
+};
+
+/* ===== 视图：日志监控 ===== */
+Views.logs = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const data = await api('/api/logs');
+  const items = (data && data.items) ? data.items : [];
+
+  // 更新 badge
+  const errCount = items.filter(i => i.level === 'ERROR').length;
+  const badge = $('#logBadge');
+  if (errCount > 0) { badge.style.display = ''; badge.textContent = errCount; }
+  else badge.style.display = 'none';
+
+  const wrap = el('div');
+  const bar = el('div', {class:'filter-bar'});
+  bar.appendChild(el('span',{class:'label'},'级别'));
+  const levelSel = el('select');
+  levelSel.innerHTML = '<option value="">全部</option><option value="ERROR">ERROR</option><option value="WARN">WARN</option><option value="INFO">INFO</option>';
+  bar.appendChild(levelSel);
+  const searchInput = el('input', {type:'text', placeholder:'搜索日志…', style:'flex:1;min-width:160px'});
+  bar.appendChild(searchInput);
+  bar.appendChild(el('button', {class:'btn sm', onclick:()=>renderView('logs')}, '刷新'));
+  bar.appendChild(el('button', {class:'btn sm danger', onclick:async()=>{
+    if (!confirm('确定清空所有日志？')) return;
+    const r = await api('/api/logs/clear', {method:'POST'});
+    toast(r ? '日志已清空' : '清空失败', r?'success':'error');
+    if (r) renderView('logs');
+  }}, '清空日志'));
+  wrap.appendChild(bar);
+
+  const card = el('div', {class:'card'});
+  const list = el('div', {id:'logList'});
+
+  function renderLogs() {
+    const lv = levelSel.value, kw = searchInput.value.toLowerCase();
+    list.innerHTML = '';
+    const filtered = items.filter(i => {
+      if (lv && i.level !== lv) return false;
+      if (kw && !(i.msg||'').toLowerCase().includes(kw)) return false;
+      return true;
+    });
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="empty"><p>无日志记录</p></div>';
+      return;
+    }
+    filtered.forEach(i => {
+      list.appendChild(el('div', {class:'log-item'}, [
+        el('span', {class:'log-time'}, i.t || ''),
+        el('span', {class:'log-level '+(i.level||'INFO')}, i.level || 'INFO'),
+        el('span', {class:'log-msg'}, i.msg || '')
+      ]));
+    });
+  }
+  levelSel.addEventListener('change', renderLogs);
+  searchInput.addEventListener('input', renderLogs);
+  renderLogs();
+
+  card.appendChild(list);
+  wrap.appendChild(card);
+  container.innerHTML = '';
+  container.appendChild(wrap);
+};
+
+/* ===== 视图：系统配置 ===== */
+Views.config = async function(container) {
+  container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中…</div>';
+  const [mData, vData, stats] = await Promise.all([api('/api/models'), api('/api/voices'), api('/api/stats')]);
+
+  const wrap = el('div');
+  const twoCol = el('div', {class:'two-col'});
+  wrap.appendChild(twoCol);
+
+  // 模型配置
+  const modelCard = el('div', {class:'card'});
+  modelCard.appendChild(el('div', {class:'card-header'}, [el('h3', {}, '聊天模型')]));
+  const mBody = el('div', {class:'card-body'});
+  mBody.appendChild(el('div', {style:'margin-bottom:14px;padding:10px 14px;background:var(--bg);border-radius:8px'}, [
+    el('div', {style:'font-size:11.5px;color:var(--text-muted);margin-bottom:3px'}, '当前模型'),
+    el('div', {style:'font-size:14px;font-weight:600;font-family:var(--mono)'}, (mData && mData.current) || (stats && stats.model) || '-')
+  ]));
+  const modelList = el('div', {style:'display:flex;flex-direction:column;gap:8px'});
+  if (mData && mData.models) {
+    mData.models.forEach(m => {
+      const isCur = m.id === mData.current;
+      const item = el('div', {style:`display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid ${isCur?'var(--brand)':'var(--border)'};border-radius:8px;cursor:pointer;${isCur?'background:var(--brand-light)':''}`}, [
+        el('div', {style:'flex:1'}, [
+          el('div', {style:'font-size:13.5px;font-weight:500'}, m.name || m.id),
+          el('div', {style:'font-size:11.5px;color:var(--text-muted);font-family:var(--mono);margin-top:2px'}, m.id)
+        ]),
+        isCur ? el('span',{class:'tag brand'},'当前') : el('button',{class:'btn sm primary',onclick:async(e)=>{
+          e.stopPropagation();
+          const r = await api('/api/models/apply', {method:'POST', body:{model:m.id}});
+          toast(r ? `已切换到 ${m.name}` : '切换失败', r?'success':'error');
+          if (r) renderView('config');
+        }}, '切换')
+      ]);
+      modelList.appendChild(item);
+    });
+  } else {
+    modelList.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">无法获取模型列表</div>';
+  }
+  mBody.appendChild(modelList);
+  modelCard.appendChild(mBody);
+  twoCol.appendChild(modelCard);
+
+  // 语音配置
+  const voiceCard = el('div', {class:'card'});
+  voiceCard.appendChild(el('div', {class:'card-header'}, [el('h3', {}, '语音引擎')]));
+  const vBody = el('div', {class:'card-body'});
+  vBody.appendChild(el('div', {style:'margin-bottom:14px;padding:10px 14px;background:var(--bg);border-radius:8px'}, [
+    el('div', {style:'font-size:11.5px;color:var(--text-muted);margin-bottom:3px'}, '当前语音'),
+    el('div', {style:'font-size:14px;font-weight:600'}, (stats && stats.voice) || '-')
+  ]));
+  const voiceList = el('div', {style:'display:flex;flex-direction:column;gap:8px'});
+  if (vData && vData.voices) {
+    vData.voices.forEach(v => {
+      const isCur = v.id === vData.current;
+      const item = el('div', {style:`display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid ${isCur?'var(--brand)':'var(--border)'};border-radius:8px;`}, [
+        el('div', {style:'flex:1'}, [
+          el('div', {style:'font-size:13.5px;font-weight:500'}, v.name || v.id),
+          el('div', {style:'font-size:11.5px;color:var(--text-muted);margin-top:2px'}, v.provider || '')
+        ]),
+        el('button',{class:'btn sm',onclick:async()=>{
+          const r = await api('/api/voice/preview', {method:'POST', body:{voice:v.id}});
+          toast(r ? '预览已生成' : '预览失败', r?'success':'error');
+        }}, '试听'),
+        isCur ? el('span',{class:'tag brand'},'当前') : el('button',{class:'btn sm primary',onclick:async()=>{
+          const r = await api('/api/voice/apply', {method:'POST', body:{voice:v.id}});
+          toast(r ? `已切换到 ${v.name}` : '切换失败', r?'success':'error');
+          if (r) renderView('config');
+        }}, '切换')
+      ]);
+      voiceList.appendChild(item);
+    });
+  } else {
+    voiceList.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">无法获取语音列表</div>';
+  }
+  vBody.appendChild(voiceList);
+  voiceCard.appendChild(vBody);
+  twoCol.appendChild(voiceCard);
+
+  // 危险操作区
+  const dangerCard = el('div', {class:'card'});
+  dangerCard.appendChild(el('div', {class:'card-header'}, [el('h3', {style:'color:var(--danger)'}, '危险操作')]));
+  const dBody = el('div', {class:'card-body', style:'display:flex;gap:10px;flex-wrap:wrap'});
+  dBody.appendChild(el('button', {class:'btn danger', onclick:async()=>{
+    if (!confirm('确定重置对话上下文？这会清空当前对话的短期记忆。')) return;
+    const r = await api('/api/reset', {method:'POST'});
+    toast(r ? '已重置' : '重置失败', r?'success':'error');
+  }}, '重置对话上下文'));
+  dBody.appendChild(el('button', {class:'btn danger', onclick:async()=>{
+    if (!confirm('确定清空所有聊天历史？此操作不可恢复。')) return;
+    const r = await api('/api/history/clear', {method:'POST'});
+    toast(r ? '历史已清空' : '清空失败', r?'success':'error');
+  }}, '清空聊天历史'));
+  dBody.appendChild(el('button', {class:'btn danger', onclick:async()=>{
+    if (!confirm('确定重置她的生活状态？这会清空 life_engine 的状态。')) return;
+    const r = await api('/api/persona/reset_life', {method:'POST'});
+    toast(r ? '生活状态已重置' : '重置失败', r?'success':'error');
+  }}, '重置生活状态'));
+  dangerCard.appendChild(dBody);
+  wrap.appendChild(dangerCard);
+
+  // 服务信息
+  const infoCard = el('div', {class:'card', style:'margin-top:16px'});
+  infoCard.appendChild(el('div', {class:'card-header'}, [el('h3', {}, '服务信息')]));
+  const iBody = el('div', {class:'card-body'});
+  const infoTable = el('table', {class:'data'});
+  infoTable.innerHTML = '<colgroup><col style="width:30%"><col style="width:70%"></colgroup>';
+  const infos = [
+    ['服务地址', State.serverUrl],
+    ['连接状态', State.demoMode ? '演示模式' : (State.connected ? '已连接' : '未连接')],
+    ['Token', State.token ? '已配置 (' + State.token.slice(0,4) + '****)' : '未配置'],
+    ['项目版本', 'Vigil (知夏)'],
+  ];
+  infos.forEach(([k,v]) => infoTable.appendChild(el('tr',{},[el('td',{},k),el('td',{class:'mono'},v)])));
+  iBody.appendChild(infoTable);
+  infoCard.appendChild(iBody);
+  wrap.appendChild(infoCard);
+
+  container.innerHTML = '';
+  container.appendChild(wrap);
+};
+</script>
+</body>
+</html>
