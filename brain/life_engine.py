@@ -324,7 +324,7 @@ def _strip_self(s):
 class LifeEngine:
     """她自己的生活。所有写盘都在这一个类里，外面只管调 catch_up / life_block。"""
 
-    def __init__(self, api_config=None, home=None, timeout=40, name=""):
+    def __init__(self, api_config=None, home=None, timeout=40, name="", persona=""):
         cfg = (api_config or {}).get("life") or {}
         self.enabled = bool(cfg.get("enabled", True))
         self.diary_hour = int(cfg.get("diary_hour", DIARY_HOUR))
@@ -332,6 +332,9 @@ class LifeEngine:
         self.api = api_config or {}
         self.timeout = timeout
         self.name = name
+        # 当前人设的 key。写进 state.json，用来判断"这份生活是谁留下的"——
+        # 换人设后生活不会自动跟着换，得让人知道该重置（见 is_stale）
+        self.persona = persona or ""
         self.home = home or LIFE_DIR
         # 自定义 home 只给测试用，journal 挨着它放。world.json 单独在 config/
         # 下（属于"你会手动改的设定"，不跟经历流混一起）
@@ -604,6 +607,68 @@ class LifeEngine:
     def _save_state(self, st):
         json.dump(st, open(self.state_path, "w", encoding="utf-8"),
                   ensure_ascii=False, indent=2)
+
+    # --- 这份生活是谁留下的 ---
+    def is_stale(self):
+        """生活痕迹是不是另一套人设留下的。
+
+        比对的是 state.json 里记的 persona 标记，不去猜内容里有没有旧身份
+        （关键词匹配漏一个就穿帮）。两种情况不算旧：还没开始过日子（没东西
+        可保留），以及标记一致。老版本写的数据没有标记，一律当旧的问一句。
+        """
+        try:
+            if not os.path.exists(self.events_path) or os.path.getsize(self.events_path) == 0:
+                return False
+        except OSError:
+            return False
+        return (self.state().get("persona") or "") != (self.persona or "")
+
+    def reset_life(self, keep_chat=True):
+        """清掉她的生活痕迹，让她从今天重新过日子。先备份，可还原。
+
+        清的都是"她自己的日子"：生活流、日记、朋友圈、历史摘要、日程。
+        记忆库和聊天存档默认留着 —— 换人设不等于失忆，她还记得你们聊过。
+        删完不重启：惰性补算会在下一轮把今天重新过一遍。
+        """
+        import shutil
+        # 从 self.home 往上推 data 目录，别写死 paths.DATA_DIR ——
+        # 那样测试只能在真实数据上跑，而这个函数是删数据的
+        base = os.path.dirname(os.path.abspath(self.home))
+        bak = os.path.join(base, "_bak_life_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+        os.makedirs(bak, exist_ok=True)
+        gone = []
+        # 日记目录要用 self.journal_dir：home 传了的话它就在 home 下面，
+        # 拼 base+"journal" 会清错地方（os.remove 删目录还会静默失败）
+        for src, tag in ((self.home, "her_life"), (self.journal_dir, "journal"),
+                         (os.path.join(base, "summary"), "summary")):
+            if not os.path.isdir(src):
+                continue
+            shutil.copytree(src, os.path.join(bak, tag), dirs_exist_ok=True)
+            # 只清内容不删目录本身：journal 目录在 home 下面，
+            # 先 rmtree(home) 会把它一起带走，后面那轮就当它不存在了
+            for f in os.listdir(src):
+                fp = os.path.join(src, f)
+                if os.path.isdir(fp):
+                    shutil.rmtree(fp, ignore_errors=True)
+                else:
+                    try:
+                        os.remove(fp)
+                    except OSError:
+                        pass
+            gone.append(tag)
+        os.makedirs(self.home, exist_ok=True)
+        os.makedirs(self.journal_dir, exist_ok=True)
+        for rel in ("moments.jsonl", "agenda.json") + (() if keep_chat else ("chat_history.jsonl",)):
+            src = os.path.join(base, rel)
+            if os.path.exists(src):
+                shutil.copyfile(src, os.path.join(bak, rel))
+                os.remove(src)
+                gone.append(rel)
+        # 空壳留着，list_moments 之类有 OSError 兜底，但重建时更稳
+        for rel in ("moments.jsonl", "chat_history.jsonl"):
+            open(os.path.join(base, rel), "a", encoding="utf-8").close()
+        self._last_run = 0.0
+        return {"backup": bak, "cleared": gone}
 
     def events(self, days=None):
         """全部经历，按时间顺序。days 给了就只返回最近几天的。"""
@@ -1010,6 +1075,8 @@ class LifeEngine:
         st = self.state()
         if not st.get("started"):
             st["started"] = now.date().isoformat()
+            # 标记这份生活属于哪套人设，换人设后据此判断该不该重置
+            st["persona"] = self.persona
             self._save_state(st)
 
         # --- 1. 找出缺哪些片段 ---

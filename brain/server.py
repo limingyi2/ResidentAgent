@@ -96,18 +96,29 @@ def build_local_brain(verbose=True):
         if verbose:
             print(f"[大脑] 聊天记录没读回来（不影响聊天）：{e}", flush=True)
 
+    _attach_life_engine(b, api_config, verbose=verbose)
+
+    return b
+
+
+def _attach_life_engine(b, api_config, verbose=False):
+    """给她装上生活引擎。换人设后要重跑一次——引擎在构造时把名字和
+    world.json 读进去了，不重建的话她还用着上一套人设的日常。"""
     try:
         from life_engine import LifeEngine
-        eng = LifeEngine(api_config, name=(b.persona.get("name") or ""))
+        from persona_store import key_from_config
+        eng = LifeEngine(api_config,
+                         name=(b.persona.get("name") or ""),
+                         persona=key_from_config(api_config))
         if eng.enabled:
             b.life = eng
             if verbose:
                 print("[大脑] 生活引擎就绪", flush=True)
+            return eng
     except Exception as e:
         if verbose:
             print(f"[大脑] 生活引擎没起来（不影响聊天）：{e}", flush=True)
-
-    return b
+    return None
 
 
 # 聊天锁的等待上限（秒），算出来的不是拍的：
@@ -664,16 +675,41 @@ def start_remote_api(brain):
                         api_config["persona_file"] = cfg["persona_file"]
                         with _chat_lock():
                             brain.reload_persona()
+                            # 生活引擎在构造时读了名字和 world.json，不重建她
+                            # 还会用旧人设的日常；重建后顺便报一下旧生活还在不在
+                            _attach_life_engine(brain, api_config)
+                            stale = bool(getattr(brain, "life", None)
+                                         and brain.life.is_stale())
                         her = ""
                         try:
                             her = brain.persona.get("name") or ""
                         except Exception:
                             pass
-                        print(f"[大脑] 人设已切换为 {key}（{her}）",
+                        print(f"[大脑] 人设已切换为 {key}（{her}）"
+                              f"{'｜她的日常还是旧的' if stale else ''}",
                               flush=True)
-                        self._json(200, {"ok": True, "name": her})
+                        self._json(200, {"ok": True, "name": her,
+                                         "stale_life": stale})
                     except Exception as e:
                         self._json(200, {"ok": False, "err": str(e)[:80]})
+                elif path == "/api/persona/reset_life":
+                    # 换完人设把她的日常、朋友圈、日记清掉重新长。
+                    # 记忆库和聊天存档默认留着——换人设不等于失忆。
+                    try:
+                        eng = getattr(brain, "life", None)
+                        if not eng:
+                            self._json(200, {"ok": False, "err": "生活引擎没起来"})
+                            return
+                        with _chat_lock():
+                            r = eng.reset_life(keep_chat=bool(body.get("keep_chat", True)))
+                        print("[大脑] 生活已重置：清掉 %s，备份在 %s"
+                              % ("、".join(r.get("cleared") or []), r.get("backup")),
+                              flush=True)
+                        self._json(200, {"ok": True, "backup": r.get("backup"),
+                                         "cleared": r.get("cleared")})
+                    except Exception as e:
+                        errlog.log_exc("api/persona/reset_life", e)
+                        self._json(200, {"ok": False, "err": str(e)[:120]})
                 elif path == "/api/persona/new":
                     # 新建一套人设模板（不自动切过去，省得她换脸换名字你还没看仔细）
                     try:

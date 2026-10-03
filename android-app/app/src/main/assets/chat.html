@@ -1594,9 +1594,25 @@ async function applyPersona(key, label) {
   try {
     const r = await fetch(api('/api/persona/apply'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key }) });
     const d = await r.json();
-    if (d.ok) { tip('已切换：' + (d.name || label)); loadPersonas(); }
-    else tip(d.err || '切换失败');
+    if (d.ok) {
+      tip('已切换：' + (d.name || label));
+      loadPersonas();
+      // 她的日常、朋友圈、日记还是上一套人设留下的 → 问一句要不要清掉重来
+      if (d.stale_life) askResetLife(d.name || label);
+    } else tip(d.err || '切换失败');
   } catch (e) { tip('切换失败，检查网络'); }
+}
+
+function askResetLife(name) {
+  confirmSheet('她的日常、朋友圈、日记还是上一套人设留下的。\n要清掉、让她按' + name + '重新过日子吗？\n（你们聊过的事她还记得）',
+    async () => {
+      tip('正在清…');
+      try {
+        const r = await fetch(api('/api/persona/reset_life'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+        const d = await r.json();
+        tip(d.ok ? '清好了，她会按新的人设重新过日子' : (d.err || '清失败'));
+      } catch (e) { tip('清失败，检查网络'); }
+    }, '清掉重来');
 }
 
 /* --- 她的声音 --- */
